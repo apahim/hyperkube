@@ -1,0 +1,7 @@
+## Append samples of your project ##
+resources:
+- hcp_v1alpha1_managedhostedcluster.yaml
+- hcp_v1alpha1_hostedclustertemplate.yaml
+- hcp_v1alpha1_versionstream.yaml
+- hcp_v1alpha1_upgradeschedule.yaml
+# +kubebuilder:scaffold:manifestskustomizesamples

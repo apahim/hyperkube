@@ -1,0 +1,60 @@
+/*
+Copyright 2026.
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+*/
+
+package apiserver
+
+import (
+	"encoding/json"
+	"net/http"
+
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
+)
+
+func writeError(w http.ResponseWriter, err error) {
+	code := http.StatusInternalServerError
+
+	switch {
+	case apierrors.IsNotFound(err):
+		code = http.StatusNotFound
+	case apierrors.IsAlreadyExists(err):
+		code = http.StatusConflict
+	case apierrors.IsConflict(err):
+		code = http.StatusConflict
+	case apierrors.IsForbidden(err):
+		code = http.StatusForbidden
+	case apierrors.IsInvalid(err):
+		code = http.StatusUnprocessableEntity
+	case apierrors.IsBadRequest(err):
+		code = http.StatusBadRequest
+	}
+
+	writeErrorMsg(w, code, err.Error())
+}
+
+func writeErrorMsg(w http.ResponseWriter, code int, message string) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(code)
+	_ = json.NewEncoder(w).Encode(map[string]any{
+		"error": message,
+		"code":  code,
+	})
+}
+
+func writeJSON(w http.ResponseWriter, status int, v any) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	_ = json.NewEncoder(w).Encode(v)
+}

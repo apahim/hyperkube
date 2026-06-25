@@ -1,0 +1,19 @@
+namespace HCP {
+    entity Project = {};
+
+    entity User in [Project] = {
+        email: String,
+    };
+
+    entity ManagedHostedCluster in [Project] = {};
+
+    action ReadManagedHostedCluster appliesTo {
+        principal: [User],
+        resource: [ManagedHostedCluster, Project],
+    };
+
+    action WriteManagedHostedCluster appliesTo {
+        principal: [User],
+        resource: [ManagedHostedCluster, Project],
+    };
+}

@@ -1,0 +1,58 @@
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: manager-role
+rules:
+- apiGroups:
+  - hcp.gcp.hypershift.openshift.com
+  resources:
+  - hostedclustertemplates
+  verbs:
+  - get
+  - list
+  - watch
+- apiGroups:
+  - hcp.gcp.hypershift.openshift.com
+  resources:
+  - managedhostedclusters
+  - upgradeschedules
+  - versionstreams
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
+  - hcp.gcp.hypershift.openshift.com
+  resources:
+  - managedhostedclusters/finalizers
+  - upgradeschedules/finalizers
+  - versionstreams/finalizers
+  verbs:
+  - update
+- apiGroups:
+  - hcp.gcp.hypershift.openshift.com
+  resources:
+  - managedhostedclusters/status
+  - upgradeschedules/status
+  - versionstreams/status
+  verbs:
+  - get
+  - patch
+  - update
+- apiGroups:
+  - hypershift.openshift.io
+  resources:
+  - hostedclusters
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch

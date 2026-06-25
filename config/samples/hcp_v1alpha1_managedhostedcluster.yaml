@@ -1,0 +1,12 @@
+apiVersion: hcp.gcp.hypershift.openshift.com/v1alpha1
+kind: ManagedHostedCluster
+metadata:
+  labels:
+    app.kubernetes.io/name: gcp-hcp-backend
+    app.kubernetes.io/managed-by: kustomize
+  name: managedhostedcluster-sample
+  namespace: default
+spec:
+  clusterID: my-cluster-001
+  versionStreamRef:
+    name: stable

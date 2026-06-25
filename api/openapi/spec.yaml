@@ -1,0 +1,337 @@
+components:
+  schemas:
+    Condition:
+      description: Standard Kubernetes condition
+      properties:
+        lastTransitionTime:
+          format: date-time
+          type: string
+        message:
+          description: Human-readable message
+          type: string
+        observedGeneration:
+          format: int64
+          type: integer
+        reason:
+          description: Programmatic reason for the condition
+          type: string
+        status:
+          enum:
+          - "True"
+          - "False"
+          - Unknown
+          type: string
+        type:
+          description: Type of condition
+          type: string
+      required:
+      - type
+      - status
+      - reason
+      - message
+      - lastTransitionTime
+      type: object
+    ManagedHostedCluster:
+      description: ManagedHostedCluster is the Schema for the managedhostedclusters
+        API
+      properties:
+        metadata:
+          $ref: '#/components/schemas/ObjectMeta'
+        spec:
+          description: spec defines the desired state of ManagedHostedCluster
+          properties:
+            clusterID:
+              description: |-
+                clusterID is the unique identifier for this cluster.
+                Used as a template parameter when rendering the HostedCluster CR.
+              type: string
+            upgradeScheduleRef:
+              description: |-
+                upgradeScheduleRef optionally references an UpgradeSchedule in the same
+                namespace that controls when version upgrades are applied.
+                If not set, upgrades apply immediately when the VersionStream target changes.
+              properties:
+                name:
+                  description: name is the name of the resource.
+                  type: string
+              required:
+              - name
+              type: object
+            versionStreamRef:
+              description: |-
+                versionStreamRef references a VersionStream that determines
+                the target OCP version for this cluster.
+              properties:
+                name:
+                  description: name is the name of the VersionStream resource.
+                  type: string
+              required:
+              - name
+              type: object
+          required:
+          - clusterID
+          - versionStreamRef
+          type: object
+        status:
+          description: status defines the observed state of ManagedHostedCluster
+          properties:
+            conditions:
+              description: conditions represent the current state of the ManagedHostedCluster
+                resource.
+              items:
+                description: Condition contains details for one aspect of the current
+                  state of this API Resource.
+                properties:
+                  lastTransitionTime:
+                    description: |-
+                      lastTransitionTime is the last time the condition transitioned from one status to another.
+                      This should be when the underlying condition changed.  If that is not known, then using the time when the API field changed is acceptable.
+                    format: date-time
+                    type: string
+                  message:
+                    description: |-
+                      message is a human readable message indicating details about the transition.
+                      This may be an empty string.
+                    maxLength: 32768
+                    type: string
+                  observedGeneration:
+                    description: |-
+                      observedGeneration represents the .metadata.generation that the condition was set based upon.
+                      For instance, if .metadata.generation is currently 12, but the .status.conditions[x].observedGeneration is 9, the condition is out of date
+                      with respect to the current state of the instance.
+                    format: int64
+                    minimum: 0
+                    type: integer
+                  reason:
+                    description: |-
+                      reason contains a programmatic identifier indicating the reason for the condition's last transition.
+                      Producers of specific condition types may define expected values and meanings for this field,
+                      and whether the values are considered a guaranteed API.
+                      The value should be a CamelCase string.
+                      This field may not be empty.
+                    maxLength: 1024
+                    minLength: 1
+                    pattern: ^[A-Za-z]([A-Za-z0-9_,:]*[A-Za-z0-9_])?$
+                    type: string
+                  status:
+                    description: status of the condition, one of True, False, Unknown.
+                    enum:
+                    - "True"
+                    - "False"
+                    - Unknown
+                    type: string
+                  type:
+                    description: type of condition in CamelCase or in foo.example.com/CamelCase.
+                    maxLength: 316
+                    pattern: ^([a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*/)?(([A-Za-z0-9][-A-Za-z0-9_.]*)?[A-Za-z0-9])$
+                    type: string
+                required:
+                - lastTransitionTime
+                - message
+                - reason
+                - status
+                - type
+                type: object
+              type: array
+          type: object
+      required:
+      - spec
+      type: object
+    ManagedHostedClusterList:
+      description: A list of ManagedHostedCluster resources
+      properties:
+        items:
+          items:
+            $ref: '#/components/schemas/ManagedHostedCluster'
+          type: array
+        metadata:
+          properties:
+            continue:
+              description: Token for the next page of results
+              type: string
+            resourceVersion:
+              type: string
+          type: object
+      required:
+      - items
+      type: object
+    ObjectMeta:
+      description: Standard object metadata
+      properties:
+        annotations:
+          additionalProperties:
+            type: string
+          type: object
+        creationTimestamp:
+          description: Creation timestamp
+          format: date-time
+          readOnly: true
+          type: string
+        labels:
+          additionalProperties:
+            type: string
+          type: object
+        name:
+          description: Name of the resource
+          type: string
+        namespace:
+          description: Namespace of the resource
+          type: string
+        resourceVersion:
+          description: Resource version for optimistic concurrency
+          type: string
+      type: object
+info:
+  description: REST API for managing HyperShift hosted clusters on GCP
+  title: GCP HCP Backend API
+  version: v1alpha1
+openapi: 3.0.3
+paths:
+  /v1alpha1/namespaces/{namespace}/managedhostedclusters:
+    get:
+      operationId: listManagedHostedCluster
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ManagedHostedClusterList'
+          description: OK
+      summary: List ManagedHostedCluster resources
+      tags:
+      - ManagedHostedCluster
+    parameters:
+    - description: Namespace of the resource
+      in: path
+      name: namespace
+      required: true
+      schema:
+        type: string
+    post:
+      operationId: createManagedHostedCluster
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ManagedHostedCluster'
+        required: true
+      responses:
+        "201":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ManagedHostedCluster'
+          description: Created
+        "409":
+          description: Conflict - resource already exists
+      summary: Create a ManagedHostedCluster
+      tags:
+      - ManagedHostedCluster
+  /v1alpha1/namespaces/{namespace}/managedhostedclusters/{name}:
+    delete:
+      operationId: deleteManagedHostedCluster
+      responses:
+        "200":
+          description: OK
+        "404":
+          description: Not found
+      summary: Delete a ManagedHostedCluster
+      tags:
+      - ManagedHostedCluster
+    get:
+      operationId: getManagedHostedCluster
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ManagedHostedCluster'
+          description: OK
+        "404":
+          description: Not found
+      summary: Get a ManagedHostedCluster
+      tags:
+      - ManagedHostedCluster
+    parameters:
+    - description: Namespace of the resource
+      in: path
+      name: namespace
+      required: true
+      schema:
+        type: string
+    - description: Name of the ManagedHostedCluster
+      in: path
+      name: name
+      required: true
+      schema:
+        type: string
+    put:
+      operationId: updateManagedHostedCluster
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ManagedHostedCluster'
+        required: true
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ManagedHostedCluster'
+          description: OK
+        "404":
+          description: Not found
+        "409":
+          description: Conflict - resource version mismatch
+      summary: Update a ManagedHostedCluster
+      tags:
+      - ManagedHostedCluster
+  /v1alpha1/namespaces/{namespace}/managedhostedclusters/{name}/status:
+    get:
+      operationId: getManagedHostedClusterStatus
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ManagedHostedCluster'
+          description: OK
+        "404":
+          description: Not found
+      summary: Get status of a ManagedHostedCluster
+      tags:
+      - ManagedHostedCluster
+    parameters:
+    - description: Namespace of the resource
+      in: path
+      name: namespace
+      required: true
+      schema:
+        type: string
+    - description: Name of the ManagedHostedCluster
+      in: path
+      name: name
+      required: true
+      schema:
+        type: string
+    put:
+      operationId: updateManagedHostedClusterStatus
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ManagedHostedCluster'
+        required: true
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ManagedHostedCluster'
+          description: OK
+        "404":
+          description: Not found
+      summary: Update status of a ManagedHostedCluster
+      tags:
+      - ManagedHostedCluster
