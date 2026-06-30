@@ -287,6 +287,34 @@ paths:
       summary: Update a ManagedHostedCluster
       tags:
       - ManagedHostedCluster
+  /v1alpha1/namespaces/{namespace}/managedhostedclusters/{name}/kubeconfig:
+    get:
+      operationId: getKubeConfig
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                type: object
+          description: Kubeconfig for the cluster (placeholder)
+        "404":
+          description: Not found
+      summary: Get kubeconfig for a ManagedHostedCluster
+      tags:
+      - ManagedHostedCluster
+    parameters:
+    - description: Namespace of the resource
+      in: path
+      name: namespace
+      required: true
+      schema:
+        type: string
+    - description: Name of the ManagedHostedCluster
+      in: path
+      name: name
+      required: true
+      schema:
+        type: string
   /v1alpha1/namespaces/{namespace}/managedhostedclusters/{name}/status:
     get:
       operationId: getManagedHostedClusterStatus

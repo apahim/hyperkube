@@ -132,3 +132,26 @@ func (h *Handler) Delete(w http.ResponseWriter, r *http.Request) {
 
 	writeJSON(w, http.StatusOK, map[string]string{"status": "deleted"})
 }
+
+func (h *Handler) GetKubeConfig(w http.ResponseWriter, r *http.Request) {
+	namespace := r.PathValue("namespace")
+	name := r.PathValue("name")
+
+	var obj hcpv1alpha1.ManagedHostedCluster
+	if err := h.Client.Get(r.Context(), client.ObjectKey{Namespace: namespace, Name: name}, &obj); err != nil {
+		writeError(w, err)
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{
+		"apiVersion": "v1",
+		"kind":       "Config",
+		"clusters":   []any{},
+		"contexts":   []any{},
+		"users":      []any{},
+		"metadata": map[string]string{
+			"cluster": name,
+			"status":  "placeholder",
+		},
+	})
+}

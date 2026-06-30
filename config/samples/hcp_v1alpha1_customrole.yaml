@@ -1,0 +1,13 @@
+apiVersion: hcp.gcp.hypershift.openshift.com/v1alpha1
+kind: CustomRole
+metadata:
+  name: regional-developer
+  namespace: my-project
+spec:
+  description: "Developer with access restricted to staging clusters"
+  permissions:
+    - cluster.list
+    - cluster.get
+    - cluster.kubeconfig
+  conditions:
+    - 'resource.labels.env == "staging"'

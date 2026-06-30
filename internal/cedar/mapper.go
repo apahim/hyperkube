@@ -5,6 +5,8 @@ import (
 	"regexp"
 )
 
+const ResourceTypeManagedHostedCluster = "ManagedHostedCluster"
+
 type CedarMapping struct {
 	Action       string
 	ResourceType string
@@ -20,13 +22,23 @@ type routeEntry struct {
 
 var routes = []routeEntry{
 	{
+		pattern:      regexp.MustCompile(`^/v1alpha1/namespaces/([^/]+)/managedhostedclusters/([^/]+)/kubeconfig$`),
+		methodAction: map[string]string{"GET": "GetKubeConfig"},
+		hasResource:  true,
+	},
+	{
 		pattern:      regexp.MustCompile(`^/v1alpha1/namespaces/([^/]+)/managedhostedclusters/([^/]+)$`),
-		methodAction: map[string]string{"GET": "ReadManagedHostedCluster", "PUT": "WriteManagedHostedCluster", "DELETE": "WriteManagedHostedCluster"},
+		methodAction: map[string]string{"GET": "GetManagedHostedCluster", "PUT": "UpdateManagedHostedCluster", "DELETE": "DeleteManagedHostedCluster"},
 		hasResource:  true,
 	},
 	{
 		pattern:      regexp.MustCompile(`^/v1alpha1/namespaces/([^/]+)/managedhostedclusters$`),
-		methodAction: map[string]string{"GET": "ReadManagedHostedCluster", "POST": "WriteManagedHostedCluster"},
+		methodAction: map[string]string{"GET": "ListManagedHostedClusters", "POST": "CreateManagedHostedCluster"},
+		hasResource:  false,
+	},
+	{
+		pattern:      regexp.MustCompile(`^/authz/namespaces/([^/]+)/`),
+		methodAction: map[string]string{"GET": "ManagePolicies", "POST": "ManagePolicies", "PUT": "ManagePolicies", "DELETE": "ManagePolicies"},
 		hasResource:  false,
 	},
 }
@@ -46,7 +58,7 @@ func MapRequest(r *http.Request) *CedarMapping {
 			ProjectID: matches[1],
 		}
 		if route.hasResource {
-			m.ResourceType = "ManagedHostedCluster"
+			m.ResourceType = ResourceTypeManagedHostedCluster
 			m.ResourceID = matches[2]
 		} else {
 			m.ResourceType = "Project"

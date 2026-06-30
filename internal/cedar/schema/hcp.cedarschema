@@ -5,15 +5,42 @@ namespace HCP {
         email: String,
     };
 
-    entity ManagedHostedCluster in [Project] = {};
+    entity ManagedHostedCluster in [Project] = {
+        labels: Record,
+    };
 
-    action ReadManagedHostedCluster appliesTo {
+    action CreateManagedHostedCluster appliesTo {
+        principal: [User],
+        resource: [Project],
+    };
+
+    action ListManagedHostedClusters appliesTo {
+        principal: [User],
+        resource: [Project],
+    };
+
+    action GetManagedHostedCluster appliesTo {
         principal: [User],
         resource: [ManagedHostedCluster, Project],
     };
 
-    action WriteManagedHostedCluster appliesTo {
+    action UpdateManagedHostedCluster appliesTo {
         principal: [User],
         resource: [ManagedHostedCluster, Project],
+    };
+
+    action DeleteManagedHostedCluster appliesTo {
+        principal: [User],
+        resource: [ManagedHostedCluster, Project],
+    };
+
+    action GetKubeConfig appliesTo {
+        principal: [User],
+        resource: [ManagedHostedCluster, Project],
+    };
+
+    action ManagePolicies appliesTo {
+        principal: [User],
+        resource: [Project],
     };
 }

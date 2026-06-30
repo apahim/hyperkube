@@ -7,6 +7,10 @@ import (
 	cedarlib "github.com/cedar-policy/cedar-go"
 )
 
+type ResourceAttributes struct {
+	Labels map[string]string
+}
+
 type entityJSON struct {
 	UID     entityUIDJSON   `json:"uid"`
 	Attrs   map[string]any  `json:"attrs"`
@@ -18,7 +22,7 @@ type entityUIDJSON struct {
 	ID   string `json:"id"`
 }
 
-func BuildEntityMap(userID, projectID, email, resourceType, resourceID string) (cedarlib.EntityMap, error) {
+func BuildEntityMap(userID, projectID, email, resourceType, resourceID string, attrs *ResourceAttributes) (cedarlib.EntityMap, error) {
 	entities := []entityJSON{
 		{
 			UID:   entityUIDJSON{Type: "HCP::Project", ID: projectID},
@@ -31,10 +35,20 @@ func BuildEntityMap(userID, projectID, email, resourceType, resourceID string) (
 		},
 	}
 
-	if resourceType == "ManagedHostedCluster" {
+	if resourceType == ResourceTypeManagedHostedCluster {
+		clusterAttrs := map[string]any{}
+		if attrs != nil && attrs.Labels != nil {
+			labels := make(map[string]any, len(attrs.Labels))
+			for k, v := range attrs.Labels {
+				labels[k] = v
+			}
+			clusterAttrs["labels"] = labels
+		} else {
+			clusterAttrs["labels"] = map[string]any{}
+		}
 		entities = append(entities, entityJSON{
 			UID:     entityUIDJSON{Type: "HCP::ManagedHostedCluster", ID: resourceID},
-			Attrs:   map[string]any{},
+			Attrs:   clusterAttrs,
 			Parents: []entityUIDJSON{{Type: "HCP::Project", ID: projectID}},
 		})
 	}

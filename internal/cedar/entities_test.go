@@ -7,7 +7,7 @@ import (
 )
 
 func TestBuildEntityMap_ProjectLevel(t *testing.T) {
-	em, err := BuildEntityMap("alice", "my-project", "alice@example.com", "Project", "my-project")
+	em, err := BuildEntityMap("alice", "my-project", "alice@example.com", "Project", "my-project", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -39,7 +39,7 @@ func TestBuildEntityMap_ProjectLevel(t *testing.T) {
 }
 
 func TestBuildEntityMap_ClusterLevel(t *testing.T) {
-	em, err := BuildEntityMap("bob", "prod", "bob@example.com", "ManagedHostedCluster", "cluster-1")
+	em, err := BuildEntityMap("bob", "prod", "bob@example.com", "ManagedHostedCluster", "cluster-1", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -60,5 +60,59 @@ func TestBuildEntityMap_ClusterLevel(t *testing.T) {
 	}
 	if !hasParent {
 		t.Error("ManagedHostedCluster should have Project as parent")
+	}
+}
+
+func TestBuildEntityMap_WithLabels(t *testing.T) {
+	attrs := &ResourceAttributes{
+		Labels: map[string]string{"env": "staging", "region": "us-east1"},
+	}
+	em, err := BuildEntityMap("alice", "my-project", "alice@example.com", "ManagedHostedCluster", "cluster-1", attrs)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	clusterUID := cedarlib.NewEntityUID("HCP::ManagedHostedCluster", "cluster-1")
+	cluster, ok := em.Get(clusterUID)
+	if !ok {
+		t.Fatal("expected ManagedHostedCluster entity")
+	}
+
+	labelsVal, ok := cluster.Attributes.Get("labels")
+	if !ok {
+		t.Fatal("expected labels attribute")
+	}
+	labelsRecord, ok := labelsVal.(cedarlib.Record)
+	if !ok {
+		t.Fatalf("expected labels to be Record, got %T", labelsVal)
+	}
+	envVal, ok := labelsRecord.Get("env")
+	if !ok {
+		t.Fatal("expected env label")
+	}
+	if envVal != cedarlib.String("staging") {
+		t.Errorf("env label: got %v, want staging", envVal)
+	}
+}
+
+func TestBuildEntityMap_NilLabels(t *testing.T) {
+	em, err := BuildEntityMap("alice", "my-project", "alice@example.com", "ManagedHostedCluster", "cluster-1", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	clusterUID := cedarlib.NewEntityUID("HCP::ManagedHostedCluster", "cluster-1")
+	cluster, ok := em.Get(clusterUID)
+	if !ok {
+		t.Fatal("expected ManagedHostedCluster entity")
+	}
+
+	labelsVal, ok := cluster.Attributes.Get("labels")
+	if !ok {
+		t.Fatal("expected labels attribute even with nil attrs")
+	}
+	_, ok = labelsVal.(cedarlib.Record)
+	if !ok {
+		t.Fatalf("expected labels to be Record, got %T", labelsVal)
 	}
 }

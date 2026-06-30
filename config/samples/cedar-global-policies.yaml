@@ -1,0 +1,15 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: cedar-global-policies
+  namespace: cedar-policies
+data:
+  policies.cedar: |
+    // Bootstrap: marketplace-handler SA can manage policies on any project.
+    // Replace MARKETPLACE_HANDLER_SA_ID with the Google Cloud SA's unique
+    // subject identifier (the "sub" claim from the SA's identity token).
+    permit (
+        principal == HCP::User::"MARKETPLACE_HANDLER_SA_ID",
+        action == HCP::Action::"ManagePolicies",
+        resource
+    );

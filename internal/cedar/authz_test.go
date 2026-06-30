@@ -11,6 +11,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
+	hcpv1alpha1 "github.com/gcp-hcp/gcp-hcp-backend/api/v1alpha1"
 	"github.com/go-jose/go-jose/v4/jwt"
 )
 
@@ -20,8 +21,11 @@ func newAuthzTestSetup(t *testing.T) (*AuthzMiddleware, *testJWKS) {
 	if err := corev1.AddToScheme(scheme); err != nil {
 		t.Fatal(err)
 	}
+	if err := hcpv1alpha1.AddToScheme(scheme); err != nil {
+		t.Fatal(err)
+	}
 	fakeClient := fake.NewClientBuilder().WithScheme(scheme).Build()
-	store, err := NewStore(fakeClient, "cedar-policies")
+	store, err := NewStore(fakeClient, "cedar-policies", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -29,7 +33,7 @@ func newAuthzTestSetup(t *testing.T) (*AuthzMiddleware, *testJWKS) {
 	tj := newTestJWKS(t)
 	validator := NewJWTValidatorWithURL(tj.server.URL)
 
-	mw := NewAuthzMiddleware(store, validator)
+	mw := NewAuthzMiddleware(store, validator, fakeClient)
 	return mw, tj
 }
 
@@ -97,7 +101,7 @@ func TestAuthzMiddleware_NoPoliciesDenies(t *testing.T) {
 func TestAuthzMiddleware_AllowWithPolicy(t *testing.T) {
 	mw, tj := newAuthzTestSetup(t)
 
-	_, err := mw.store.CreateAttachment(context.Background(), "my-project", "read-clusters", "alice")
+	_, err := mw.store.CreateAttachment(context.Background(), "my-project", "cluster-viewer", "alice")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -118,7 +122,7 @@ func TestAuthzMiddleware_AllowWithPolicy(t *testing.T) {
 func TestAuthzMiddleware_DenyWrongAction(t *testing.T) {
 	mw, tj := newAuthzTestSetup(t)
 
-	_, err := mw.store.CreateAttachment(context.Background(), "my-project", "read-clusters", "alice")
+	_, err := mw.store.CreateAttachment(context.Background(), "my-project", "cluster-viewer", "alice")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -132,14 +136,14 @@ func TestAuthzMiddleware_DenyWrongAction(t *testing.T) {
 	handler.ServeHTTP(rec, req)
 
 	if rec.Code != http.StatusForbidden {
-		t.Errorf("expected 403 for write with read-only policy, got %d: %s", rec.Code, rec.Body.String())
+		t.Errorf("expected 403 for create with viewer-only policy, got %d: %s", rec.Code, rec.Body.String())
 	}
 }
 
 func TestAuthzMiddleware_DenyWrongUser(t *testing.T) {
 	mw, tj := newAuthzTestSetup(t)
 
-	_, err := mw.store.CreateAttachment(context.Background(), "my-project", "read-clusters", "alice")
+	_, err := mw.store.CreateAttachment(context.Background(), "my-project", "cluster-viewer", "alice")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -157,10 +161,10 @@ func TestAuthzMiddleware_DenyWrongUser(t *testing.T) {
 	}
 }
 
-func TestAuthzMiddleware_FullAccessAllowsWrite(t *testing.T) {
+func TestAuthzMiddleware_ServiceAdminAllowsDelete(t *testing.T) {
 	mw, tj := newAuthzTestSetup(t)
 
-	_, err := mw.store.CreateAttachment(context.Background(), "my-project", "full-access", "alice")
+	_, err := mw.store.CreateAttachment(context.Background(), "my-project", "service-admin", "alice")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -174,6 +178,48 @@ func TestAuthzMiddleware_FullAccessAllowsWrite(t *testing.T) {
 	handler.ServeHTTP(rec, req)
 
 	if rec.Code != http.StatusOK {
-		t.Errorf("expected 200 with full-access policy, got %d: %s", rec.Code, rec.Body.String())
+		t.Errorf("expected 200 with service-admin policy, got %d: %s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestAuthzMiddleware_ClusterAdminCanCreate(t *testing.T) {
+	mw, tj := newAuthzTestSetup(t)
+
+	_, err := mw.store.CreateAttachment(context.Background(), "my-project", "cluster-admin", "alice")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	handler := mw.Wrap(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+
+	req := makeAuthRequest(t, tj, "POST", "/v1alpha1/namespaces/my-project/managedhostedclusters", "alice")
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Errorf("expected 200 with cluster-admin policy for create, got %d: %s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestAuthzMiddleware_DeveloperCannotCreate(t *testing.T) {
+	mw, tj := newAuthzTestSetup(t)
+
+	_, err := mw.store.CreateAttachment(context.Background(), "my-project", "developer", "alice")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	handler := mw.Wrap(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+
+	req := makeAuthRequest(t, tj, "POST", "/v1alpha1/namespaces/my-project/managedhostedclusters", "alice")
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusForbidden {
+		t.Errorf("expected 403 for developer trying to create, got %d: %s", rec.Code, rec.Body.String())
 	}
 }

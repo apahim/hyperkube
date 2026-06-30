@@ -46,8 +46,10 @@ func init() {
 func main() {
 	var addr string
 	var cedarPolicyNamespace string
+	var cedarGlobalPolicyCM string
 	flag.StringVar(&addr, "addr", ":8080", "HTTP listen address")
 	flag.StringVar(&cedarPolicyNamespace, "cedar-policy-namespace", "cedar-policies", "Namespace for Cedar policy ConfigMaps")
+	flag.StringVar(&cedarGlobalPolicyCM, "cedar-global-policy-configmap", cedar.DefaultGlobalPolicyCM, "ConfigMap name for global Cedar policies")
 	flag.Parse()
 
 	cfg := ctrl.GetConfigOrDie()
@@ -58,7 +60,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	cedarStore, err := cedar.NewStore(k8sClient, cedarPolicyNamespace)
+	cedarStore, err := cedar.NewStore(k8sClient, cedarPolicyNamespace, cedarGlobalPolicyCM)
 	if err != nil {
 		slog.Error("Failed to initialize Cedar store", "error", err)
 		os.Exit(1)
@@ -72,7 +74,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	authzMw := cedar.NewAuthzMiddleware(cedarStore, jwtValidator)
+	authzMw := cedar.NewAuthzMiddleware(cedarStore, jwtValidator, k8sClient)
 
 	h := &apiserver.Handler{Client: k8sClient}
 	authzH := &cedar.AuthzHandler{Store: cedarStore}
@@ -84,12 +86,16 @@ func main() {
 	mux.HandleFunc("GET /v1alpha1/namespaces/{namespace}/managedhostedclusters/{name}", h.Get)
 	mux.HandleFunc("PUT /v1alpha1/namespaces/{namespace}/managedhostedclusters/{name}", h.Update)
 	mux.HandleFunc("DELETE /v1alpha1/namespaces/{namespace}/managedhostedclusters/{name}", h.Delete)
+	mux.HandleFunc("GET /v1alpha1/namespaces/{namespace}/managedhostedclusters/{name}/kubeconfig", h.GetKubeConfig)
 
 	mux.HandleFunc("GET /authz/templates", authzH.ListTemplates)
 	mux.HandleFunc("GET /authz/templates/{name}", authzH.GetTemplate)
 	mux.HandleFunc("GET /authz/namespaces/{namespace}/attachments", authzH.ListAttachments)
 	mux.HandleFunc("POST /authz/namespaces/{namespace}/attachments", authzH.CreateAttachment)
 	mux.HandleFunc("DELETE /authz/namespaces/{namespace}/attachments/{id}", authzH.DeleteAttachment)
+
+	mux.HandleFunc("GET /authz/namespaces/{namespace}/roles", authzH.ListRoles)
+	mux.HandleFunc("GET /authz/namespaces/{namespace}/roles/{name}", authzH.GetRole)
 
 	mux.HandleFunc("GET /openapi.yaml", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/yaml")

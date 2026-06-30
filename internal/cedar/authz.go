@@ -6,17 +6,22 @@ import (
 	"net/http"
 
 	cedarlib "github.com/cedar-policy/cedar-go"
+	"sigs.k8s.io/controller-runtime/pkg/client"
+
+	hcpv1alpha1 "github.com/gcp-hcp/gcp-hcp-backend/api/v1alpha1"
 )
 
 type AuthzMiddleware struct {
 	store     *Store
 	validator *JWTValidator
+	k8sClient client.Client
 }
 
-func NewAuthzMiddleware(store *Store, validator *JWTValidator) *AuthzMiddleware {
+func NewAuthzMiddleware(store *Store, validator *JWTValidator, k8sClient client.Client) *AuthzMiddleware {
 	return &AuthzMiddleware{
 		store:     store,
 		validator: validator,
+		k8sClient: k8sClient,
 	}
 }
 
@@ -57,7 +62,18 @@ func (a *AuthzMiddleware) Wrap(next http.Handler) http.Handler {
 			ps.Add(cedarlib.PolicyID(fmt.Sprintf("policy-%d", i)), p)
 		}
 
-		entities, err := BuildEntityMap(identity.UserID, mapping.ProjectID, identity.Email, mapping.ResourceType, mapping.ResourceID)
+		var attrs *ResourceAttributes
+		if mapping.ResourceType == ResourceTypeManagedHostedCluster && mapping.ResourceID != "" {
+			var cluster hcpv1alpha1.ManagedHostedCluster
+			if err := a.k8sClient.Get(r.Context(), client.ObjectKey{
+				Namespace: mapping.ProjectID,
+				Name:      mapping.ResourceID,
+			}, &cluster); err == nil {
+				attrs = &ResourceAttributes{Labels: cluster.Labels}
+			}
+		}
+
+		entities, err := BuildEntityMap(identity.UserID, mapping.ProjectID, identity.Email, mapping.ResourceType, mapping.ResourceID, attrs)
 		if err != nil {
 			slog.Error("Failed to build entity map", "error", err)
 			writeAuthzError(w, http.StatusInternalServerError, "Entity build error")

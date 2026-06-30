@@ -75,3 +75,24 @@ func (h *AuthzHandler) DeleteAttachment(w http.ResponseWriter, r *http.Request) 
 
 	writeAuthzJSON(w, http.StatusOK, map[string]string{"status": "deleted"})
 }
+
+func (h *AuthzHandler) ListRoles(w http.ResponseWriter, r *http.Request) {
+	namespace := r.PathValue("namespace")
+	roles, err := h.Store.ListRoles(r.Context(), namespace)
+	if err != nil {
+		writeAuthzError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeAuthzJSON(w, http.StatusOK, roles)
+}
+
+func (h *AuthzHandler) GetRole(w http.ResponseWriter, r *http.Request) {
+	namespace := r.PathValue("namespace")
+	name := r.PathValue("name")
+	role, ok := h.Store.GetRole(r.Context(), name, namespace)
+	if !ok {
+		writeAuthzError(w, http.StatusNotFound, "role not found")
+		return
+	}
+	writeAuthzJSON(w, http.StatusOK, role)
+}
