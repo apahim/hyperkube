@@ -23,7 +23,6 @@ import (
 // ManagedHostedClusterSpec defines the desired state of ManagedHostedCluster.
 type ManagedHostedClusterSpec struct {
 	// clusterID is the unique identifier for this cluster.
-	// Used as a template parameter when rendering the HostedCluster CR.
 	// +required
 	ClusterID string `json:"clusterID"`
 
@@ -37,6 +36,10 @@ type ManagedHostedClusterSpec struct {
 	// If not set, upgrades apply immediately when the VersionStream target changes.
 	// +optional
 	UpgradeScheduleRef *NameReference `json:"upgradeScheduleRef,omitempty"`
+
+	// hostedCluster defines the HyperShift HostedCluster configuration for this cluster.
+	// +required
+	HostedCluster HostedClusterSpec `json:"hostedCluster"`
 }
 
 // VersionStreamReference is a reference to a cluster-scoped VersionStream resource.

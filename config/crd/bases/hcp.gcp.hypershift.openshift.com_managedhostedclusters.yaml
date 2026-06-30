@@ -41,10 +41,131 @@ spec:
             description: spec defines the desired state of ManagedHostedCluster
             properties:
               clusterID:
-                description: |-
-                  clusterID is the unique identifier for this cluster.
-                  Used as a template parameter when rendering the HostedCluster CR.
+                description: clusterID is the unique identifier for this cluster.
                 type: string
+              hostedCluster:
+                description: hostedCluster defines the HyperShift HostedCluster configuration
+                  for this cluster.
+                properties:
+                  etcd:
+                    description: etcd defines the etcd configuration for the hosted
+                      control plane.
+                    properties:
+                      managed:
+                        description: managed defines configuration when managementType
+                          is "Managed".
+                        properties:
+                          storage:
+                            description: storage defines the storage configuration
+                              for etcd.
+                            properties:
+                              type:
+                                description: type is the storage backend type (e.g.
+                                  "PersistentVolume").
+                                type: string
+                            required:
+                            - type
+                            type: object
+                        required:
+                        - storage
+                        type: object
+                      managementType:
+                        description: managementType defines how etcd is managed (e.g.
+                          "Managed", "Unmanaged").
+                        type: string
+                    required:
+                    - managementType
+                    type: object
+                  infraID:
+                    description: infraID is the unique infrastructure identifier for
+                      this cluster.
+                    type: string
+                  networking:
+                    description: networking defines the networking configuration for
+                      the cluster.
+                    properties:
+                      clusterNetwork:
+                        description: clusterNetwork is the list of IP address pools
+                          for pod IPs.
+                        items:
+                          description: NetworkRange defines a network CIDR range.
+                          properties:
+                            cidr:
+                              description: cidr is the IP address range in CIDR notation
+                                (e.g. 10.132.0.0/14).
+                              type: string
+                          required:
+                          - cidr
+                          type: object
+                        type: array
+                      serviceNetwork:
+                        description: serviceNetwork is the list of IP address pools
+                          for service IPs.
+                        items:
+                          description: NetworkRange defines a network CIDR range.
+                          properties:
+                            cidr:
+                              description: cidr is the IP address range in CIDR notation
+                                (e.g. 10.132.0.0/14).
+                              type: string
+                          required:
+                          - cidr
+                          type: object
+                        type: array
+                    type: object
+                  platform:
+                    description: platform specifies the underlying infrastructure
+                      provider for the cluster.
+                    properties:
+                      type:
+                        description: type is the infrastructure provider type (e.g.
+                          "None", "GCP", "AWS").
+                        type: string
+                    required:
+                    - type
+                    type: object
+                  release:
+                    description: release specifies the OCP release image for the hosted
+                      cluster.
+                    properties:
+                      image:
+                        description: image is the release image pullspec (e.g. quay.io/openshift-release-dev/ocp-release:4.16.3-x86_64).
+                        type: string
+                    required:
+                    - image
+                    type: object
+                  services:
+                    description: services defines the service publishing strategy
+                      for control plane services.
+                    items:
+                      description: ServicePublishingStrategyMapping defines how a
+                        control plane service is published.
+                      properties:
+                        service:
+                          description: service is the name of the service (e.g. "APIServer",
+                            "OAuthServer", "Konnectivity", "Ignition").
+                          type: string
+                        servicePublishingStrategy:
+                          description: servicePublishingStrategy defines how the service
+                            is made available.
+                          properties:
+                            type:
+                              description: type is the publishing strategy (e.g. "LoadBalancer",
+                                "Route", "NodePort").
+                              type: string
+                          required:
+                          - type
+                          type: object
+                      required:
+                      - service
+                      - servicePublishingStrategy
+                      type: object
+                    type: array
+                required:
+                - infraID
+                - platform
+                - release
+                type: object
               upgradeScheduleRef:
                 description: |-
                   upgradeScheduleRef optionally references an UpgradeSchedule in the same
@@ -70,6 +191,7 @@ spec:
                 type: object
             required:
             - clusterID
+            - hostedCluster
             - versionStreamRef
             type: object
           status:

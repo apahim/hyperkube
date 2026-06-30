@@ -28,9 +28,6 @@ resources:
 - versionstream_admin_role.yaml
 - versionstream_editor_role.yaml
 - versionstream_viewer_role.yaml
-- hostedclustertemplate_admin_role.yaml
-- hostedclustertemplate_editor_role.yaml
-- hostedclustertemplate_viewer_role.yaml
 - managedhostedcluster_admin_role.yaml
 - managedhostedcluster_editor_role.yaml
 - managedhostedcluster_viewer_role.yaml

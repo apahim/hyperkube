@@ -7,14 +7,6 @@ rules:
 - apiGroups:
   - hcp.gcp.hypershift.openshift.com
   resources:
-  - hostedclustertemplates
-  verbs:
-  - get
-  - list
-  - watch
-- apiGroups:
-  - hcp.gcp.hypershift.openshift.com
-  resources:
   - managedhostedclusters
   - upgradeschedules
   - versionstreams

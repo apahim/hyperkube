@@ -55,6 +55,7 @@ generate: controller-gen ## Generate code containing DeepCopy, DeepCopyInto, and
 openapi: manifests ## Generate standalone OpenAPI 3.0 spec from CRD schemas.
 	go run ./hack/crd-to-openapi/ \
 		-crd-dir=config/crd/bases \
+		-types-dir=api/v1alpha1 \
 		-output=api/openapi/spec.yaml \
 		-title="GCP HCP Backend API" \
 		-version="v1alpha1" \

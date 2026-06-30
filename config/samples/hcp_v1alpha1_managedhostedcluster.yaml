@@ -10,3 +10,32 @@ spec:
   clusterID: my-cluster-001
   versionStreamRef:
     name: stable
+  hostedCluster:
+    release:
+      image: "quay.io/openshift-release-dev/ocp-release:4.16.3-x86_64"
+    infraID: my-cluster-001
+    platform:
+      type: None
+    etcd:
+      managementType: Managed
+      managed:
+        storage:
+          type: PersistentVolume
+    services:
+      - service: APIServer
+        servicePublishingStrategy:
+          type: LoadBalancer
+      - service: OAuthServer
+        servicePublishingStrategy:
+          type: Route
+      - service: Konnectivity
+        servicePublishingStrategy:
+          type: Route
+      - service: Ignition
+        servicePublishingStrategy:
+          type: Route
+    networking:
+      clusterNetwork:
+        - cidr: 10.132.0.0/14
+      serviceNetwork:
+        - cidr: 172.31.0.0/16

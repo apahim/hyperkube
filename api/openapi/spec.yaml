@@ -41,10 +41,30 @@ components:
           description: spec defines the desired state of ManagedHostedCluster
           properties:
             clusterID:
-              description: |-
-                clusterID is the unique identifier for this cluster.
-                Used as a template parameter when rendering the HostedCluster CR.
+              description: clusterID is the unique identifier for this cluster.
               type: string
+            hostedCluster:
+              description: hostedCluster defines the HyperShift HostedCluster configuration
+                for this cluster.
+              properties:
+                infraID:
+                  description: infraID is the unique infrastructure identifier for
+                    this cluster.
+                  type: string
+                release:
+                  description: release specifies the OCP release image for the hosted
+                    cluster.
+                  properties:
+                    image:
+                      description: image is the release image pullspec (e.g. quay.io/openshift-release-dev/ocp-release:4.16.3-x86_64).
+                      type: string
+                  required:
+                  - image
+                  type: object
+              required:
+              - infraID
+              - release
+              type: object
             upgradeScheduleRef:
               description: |-
                 upgradeScheduleRef optionally references an UpgradeSchedule in the same
@@ -70,6 +90,7 @@ components:
               type: object
           required:
           - clusterID
+          - hostedCluster
           - versionStreamRef
           type: object
         status:
@@ -287,34 +308,6 @@ paths:
       summary: Update a ManagedHostedCluster
       tags:
       - ManagedHostedCluster
-  /v1alpha1/namespaces/{namespace}/managedhostedclusters/{name}/kubeconfig:
-    get:
-      operationId: getKubeConfig
-      responses:
-        "200":
-          content:
-            application/json:
-              schema:
-                type: object
-          description: Kubeconfig for the cluster (placeholder)
-        "404":
-          description: Not found
-      summary: Get kubeconfig for a ManagedHostedCluster
-      tags:
-      - ManagedHostedCluster
-    parameters:
-    - description: Namespace of the resource
-      in: path
-      name: namespace
-      required: true
-      schema:
-        type: string
-    - description: Name of the ManagedHostedCluster
-      in: path
-      name: name
-      required: true
-      schema:
-        type: string
   /v1alpha1/namespaces/{namespace}/managedhostedclusters/{name}/status:
     get:
       operationId: getManagedHostedClusterStatus

@@ -3,7 +3,6 @@
 # It should be run by config/default
 resources:
 - bases/hcp.gcp.hypershift.openshift.com_managedhostedclusters.yaml
-- bases/hcp.gcp.hypershift.openshift.com_hostedclustertemplates.yaml
 - bases/hcp.gcp.hypershift.openshift.com_versionstreams.yaml
 - bases/hcp.gcp.hypershift.openshift.com_upgradeschedules.yaml
 # +kubebuilder:scaffold:crdkustomizeresource

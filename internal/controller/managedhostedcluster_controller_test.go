@@ -70,6 +70,15 @@ var _ = Describe("ManagedHostedCluster Controller", func() {
 						VersionStreamRef: hcpv1alpha1.VersionStreamReference{
 							Name: "stable",
 						},
+						HostedCluster: hcpv1alpha1.HostedClusterSpec{
+							Release: hcpv1alpha1.ReleaseSpec{
+								Image: "quay.io/openshift-release-dev/ocp-release:4.16.3-x86_64",
+							},
+							InfraID: "test-cluster-001",
+							Platform: hcpv1alpha1.PlatformSpec{
+								Type: "None",
+							},
+						},
 					},
 				}
 				Expect(k8sClient.Create(ctx, resource)).To(Succeed())

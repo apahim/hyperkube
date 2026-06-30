@@ -17,18 +17,17 @@ limitations under the License.
 package controller
 
 import (
-	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
-	"text/template"
 	"time"
 
 	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
-	"k8s.io/apimachinery/pkg/util/yaml"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller"
@@ -39,15 +38,14 @@ import (
 	hcpv1alpha1 "github.com/gcp-hcp/gcp-hcp-backend/api/v1alpha1"
 )
 
-// TemplateData holds the values available to HostedClusterTemplate rendering.
-type TemplateData struct {
-	ClusterID    string
-	ReleaseImage string
+var hostedClusterGVK = schema.GroupVersionKind{
+	Group:   "hypershift.openshift.io",
+	Version: "v1beta1",
+	Kind:    "HostedCluster",
 }
 
 // HostedClusterReconciler reconciles ManagedHostedCluster resources by
-// rendering a HostedClusterTemplate and creating/updating the resulting
-// HyperShift HostedCluster CR.
+// building a HyperShift HostedCluster CR from the embedded spec.
 type HostedClusterReconciler struct {
 	client.Client
 	Scheme *runtime.Scheme
@@ -55,7 +53,6 @@ type HostedClusterReconciler struct {
 
 // +kubebuilder:rbac:groups=hcp.gcp.hypershift.openshift.com,resources=managedhostedclusters,verbs=get;list;watch
 // +kubebuilder:rbac:groups=hcp.gcp.hypershift.openshift.com,resources=managedhostedclusters/status,verbs=get;update;patch
-// +kubebuilder:rbac:groups=hcp.gcp.hypershift.openshift.com,resources=hostedclustertemplates,verbs=get;list;watch
 // +kubebuilder:rbac:groups=hcp.gcp.hypershift.openshift.com,resources=versionstreams,verbs=get;list;watch
 // +kubebuilder:rbac:groups=hypershift.openshift.io,resources=hostedclusters,verbs=get;list;watch;create;update;patch;delete
 
@@ -81,20 +78,9 @@ func (r *HostedClusterReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 		return ctrl.Result{RequeueAfter: 10 * time.Second}, nil
 	}
 
-	tmpl, err := r.findTemplate(ctx, vs.Spec.TargetVersion)
+	hc, err := buildHostedCluster(&mhc, vs.Status.ReleaseImage)
 	if err != nil {
-		log.Error(err, "Failed to find HostedClusterTemplate", "version", vs.Spec.TargetVersion)
-		return ctrl.Result{}, err
-	}
-
-	data := TemplateData{
-		ClusterID:    mhc.Spec.ClusterID,
-		ReleaseImage: vs.Status.ReleaseImage,
-	}
-
-	hc, err := renderTemplate(tmpl.Spec.Template, data)
-	if err != nil {
-		log.Error(err, "Failed to render HostedClusterTemplate")
+		log.Error(err, "Failed to build HostedCluster from spec")
 		return ctrl.Result{}, err
 	}
 
@@ -128,33 +114,30 @@ func (r *HostedClusterReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 	return ctrl.Result{}, r.setCondition(ctx, &mhc, "HostedClusterCreated", metav1.ConditionTrue, "Updated", "HostedCluster CR updated successfully")
 }
 
-func (r *HostedClusterReconciler) findTemplate(ctx context.Context, version string) (*hcpv1alpha1.HostedClusterTemplate, error) {
-	var templates hcpv1alpha1.HostedClusterTemplateList
-	if err := r.List(ctx, &templates); err != nil {
-		return nil, err
-	}
-	for i := range templates.Items {
-		if templates.Items[i].Spec.Version == version {
-			return &templates.Items[i], nil
-		}
-	}
-	return nil, fmt.Errorf("no HostedClusterTemplate found for version %q", version)
-}
-
-func renderTemplate(tmplStr string, data TemplateData) (*unstructured.Unstructured, error) {
-	t, err := template.New("hostedcluster").Parse(tmplStr)
+func buildHostedCluster(mhc *hcpv1alpha1.ManagedHostedCluster, releaseImage string) (*unstructured.Unstructured, error) {
+	specJSON, err := json.Marshal(mhc.Spec.HostedCluster)
 	if err != nil {
-		return nil, fmt.Errorf("parsing template: %w", err)
+		return nil, fmt.Errorf("marshaling hosted cluster spec: %w", err)
 	}
 
-	var buf bytes.Buffer
-	if err := t.Execute(&buf, data); err != nil {
-		return nil, fmt.Errorf("executing template: %w", err)
+	var specMap map[string]any
+	if err := json.Unmarshal(specJSON, &specMap); err != nil {
+		return nil, fmt.Errorf("unmarshaling hosted cluster spec: %w", err)
 	}
 
-	obj := &unstructured.Unstructured{}
-	if err := yaml.NewYAMLOrJSONDecoder(&buf, buf.Len()).Decode(&obj.Object); err != nil {
-		return nil, fmt.Errorf("decoding rendered YAML: %w", err)
+	// Override release image with the VersionStream-resolved value.
+	if release, ok := specMap["release"].(map[string]any); ok {
+		release["image"] = releaseImage
+	} else {
+		specMap["release"] = map[string]any{"image": releaseImage}
+	}
+
+	obj := &unstructured.Unstructured{
+		Object: map[string]any{
+			"apiVersion": hostedClusterGVK.Group + "/" + hostedClusterGVK.Version,
+			"kind":       hostedClusterGVK.Kind,
+			"spec":       specMap,
+		},
 	}
 
 	return obj, nil

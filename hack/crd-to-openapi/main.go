@@ -19,9 +19,13 @@ package main
 import (
 	"flag"
 	"fmt"
+	"go/ast"
+	"go/parser"
+	"go/token"
 	"maps"
 	"os"
 	"path/filepath"
+	"reflect"
 	"sort"
 	"strings"
 
@@ -38,13 +42,32 @@ type crdResource struct {
 }
 
 func main() {
-	var crdDir, output, title, version, kinds string
+	var crdDir, typesDir, output, title, version, kinds string
 	flag.StringVar(&crdDir, "crd-dir", "config/crd/bases", "Directory containing CRD YAML files")
+	flag.StringVar(&typesDir, "types-dir", "", "Directory containing Go type source files (for openapi:\"hidden\" tag parsing)")
 	flag.StringVar(&output, "output", "api/openapi/spec.yaml", "Output file path")
 	flag.StringVar(&title, "title", "GCP HCP Backend API", "API title")
 	flag.StringVar(&version, "version", "v1alpha1", "API version")
 	flag.StringVar(&kinds, "kinds", "", "Comma-separated list of kinds to include (default: all)")
 	flag.Parse()
+
+	var kindList []string
+	if kinds != "" {
+		for k := range strings.SplitSeq(kinds, ",") {
+			kindList = append(kindList, strings.TrimSpace(k))
+		}
+	}
+
+	// Build hidden paths from Go source if types-dir is provided.
+	hiddenByKind := make(map[string]map[string]bool)
+	if typesDir != "" {
+		var err error
+		hiddenByKind, err = buildHiddenPaths(typesDir, kindList)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Error parsing Go types for visibility: %v\n", err)
+			os.Exit(1)
+		}
+	}
 
 	resources, err := loadCRDs(crdDir)
 	if err != nil {
@@ -52,10 +75,10 @@ func main() {
 		os.Exit(1)
 	}
 
-	if kinds != "" {
+	if len(kindList) > 0 {
 		allowed := make(map[string]bool)
-		for k := range strings.SplitSeq(kinds, ",") {
-			allowed[strings.TrimSpace(k)] = true
+		for _, k := range kindList {
+			allowed[k] = true
 		}
 		var filtered []crdResource
 		for _, r := range resources {
@@ -66,7 +89,7 @@ func main() {
 		resources = filtered
 	}
 
-	spec := buildOpenAPISpec(resources, title, version)
+	spec := buildOpenAPISpec(resources, hiddenByKind, title, version)
 
 	data, err := yaml.Marshal(spec)
 	if err != nil {
@@ -142,7 +165,7 @@ func extractResource(crd map[string]any) (crdResource, error) {
 		_, hasStatus = subs["status"]
 	}
 
-	cleanedSchema := cleanSchema(schema)
+	cleanedSchema := cleanSchema(schema, nil, "")
 
 	delete(cleanedSchema["properties"].(map[string]any), "apiVersion")
 	delete(cleanedSchema["properties"].(map[string]any), "kind")
@@ -177,7 +200,7 @@ func extractResource(crd map[string]any) (crdResource, error) {
 	}, nil
 }
 
-func cleanSchema(schema map[string]any) map[string]any {
+func cleanSchema(schema map[string]any, hiddenPaths map[string]bool, currentPath string) map[string]any {
 	out := make(map[string]any)
 
 	for k, v := range schema {
@@ -190,23 +213,53 @@ func cleanSchema(schema map[string]any) map[string]any {
 			if props, ok := v.(map[string]any); ok {
 				cleaned := make(map[string]any)
 				for pk, pv := range props {
+					propPath := pk
+					if currentPath != "" {
+						propPath = currentPath + "." + pk
+					}
+					if hiddenPaths[propPath] {
+						continue
+					}
 					if pm, ok := pv.(map[string]any); ok {
-						cleaned[pk] = cleanSchema(pm)
+						cleaned[pk] = cleanSchema(pm, hiddenPaths, propPath)
 					} else {
 						cleaned[pk] = pv
 					}
 				}
 				out[k] = cleaned
 			}
+		case "required":
+			if hiddenPaths != nil {
+				if req, ok := v.([]any); ok {
+					var filtered []any
+					for _, r := range req {
+						s, _ := r.(string)
+						reqPath := s
+						if currentPath != "" {
+							reqPath = currentPath + "." + s
+						}
+						if !hiddenPaths[reqPath] {
+							filtered = append(filtered, r)
+						}
+					}
+					if len(filtered) > 0 {
+						out[k] = filtered
+					}
+				} else {
+					out[k] = v
+				}
+			} else {
+				out[k] = v
+			}
 		case "items":
 			if items, ok := v.(map[string]any); ok {
-				out[k] = cleanSchema(items)
+				out[k] = cleanSchema(items, hiddenPaths, currentPath)
 			} else {
 				out[k] = v
 			}
 		case "additionalProperties":
 			if ap, ok := v.(map[string]any); ok {
-				out[k] = cleanSchema(ap)
+				out[k] = cleanSchema(ap, hiddenPaths, currentPath)
 			} else {
 				out[k] = v
 			}
@@ -218,7 +271,7 @@ func cleanSchema(schema map[string]any) map[string]any {
 	return out
 }
 
-func buildOpenAPISpec(resources []crdResource, title, version string) map[string]any {
+func buildOpenAPISpec(resources []crdResource, hiddenByKind map[string]map[string]bool, title, version string) map[string]any {
 	schemas := make(map[string]any)
 	paths := make(map[string]any)
 
@@ -252,7 +305,8 @@ func buildOpenAPISpec(resources []crdResource, title, version string) map[string
 	schemas["ObjectMeta"] = metadataSchema
 
 	for _, res := range resources {
-		schemas[res.Kind] = buildResourceSchema(res)
+		hidden := hiddenByKind[res.Kind]
+		schemas[res.Kind] = buildResourceSchema(res, hidden)
 		schemas[res.ListKind] = buildListSchema(res)
 		addPaths(paths, res, version)
 	}
@@ -271,7 +325,7 @@ func buildOpenAPISpec(resources []crdResource, title, version string) map[string
 	}
 }
 
-func buildResourceSchema(res crdResource) map[string]any {
+func buildResourceSchema(res crdResource, hiddenPaths map[string]bool) map[string]any {
 	schema := map[string]any{
 		"type":        "object",
 		"description": getDescription(res.Schema),
@@ -282,7 +336,16 @@ func buildResourceSchema(res crdResource) map[string]any {
 	}
 
 	if srcProps, ok := res.Schema["properties"].(map[string]any); ok {
-		maps.Copy(props, srcProps)
+		// Apply hidden path filtering to the spec/status level.
+		filteredProps := make(map[string]any)
+		for pk, pv := range srcProps {
+			if pm, ok := pv.(map[string]any); ok {
+				filteredProps[pk] = cleanSchema(pm, hiddenPaths, pk)
+			} else {
+				filteredProps[pk] = pv
+			}
+		}
+		maps.Copy(props, filteredProps)
 	}
 
 	schema["properties"] = props
@@ -516,4 +579,122 @@ func mustMap(m map[string]any, key string) map[string]any {
 		return make(map[string]any)
 	}
 	return v
+}
+
+// buildHiddenPaths parses Go source files in typesDir and returns a map of
+// kind -> set of JSON paths that have the openapi:"hidden" struct tag.
+func buildHiddenPaths(typesDir string, kinds []string) (map[string]map[string]bool, error) {
+	fset := token.NewFileSet()
+	pkgs, err := parser.ParseDir(fset, typesDir, nil, 0)
+	if err != nil {
+		return nil, fmt.Errorf("parsing directory %s: %w", typesDir, err)
+	}
+
+	// Collect all struct type declarations across all packages.
+	typeMap := make(map[string]*ast.StructType)
+	for _, pkg := range pkgs {
+		for _, file := range pkg.Files {
+			for _, decl := range file.Decls {
+				genDecl, ok := decl.(*ast.GenDecl)
+				if !ok || genDecl.Tok != token.TYPE {
+					continue
+				}
+				for _, spec := range genDecl.Specs {
+					typeSpec, ok := spec.(*ast.TypeSpec)
+					if !ok {
+						continue
+					}
+					structType, ok := typeSpec.Type.(*ast.StructType)
+					if !ok {
+						continue
+					}
+					typeMap[typeSpec.Name.Name] = structType
+				}
+			}
+		}
+	}
+
+	result := make(map[string]map[string]bool)
+	for _, kind := range kinds {
+		hidden := make(map[string]bool)
+
+		// Walk <Kind>Spec under "spec" prefix.
+		if st, ok := typeMap[kind+"Spec"]; ok {
+			walkStructFields(st, "spec", typeMap, hidden)
+		}
+
+		// Walk <Kind>Status under "status" prefix.
+		if st, ok := typeMap[kind+"Status"]; ok {
+			walkStructFields(st, "status", typeMap, hidden)
+		}
+
+		if len(hidden) > 0 {
+			result[kind] = hidden
+		}
+	}
+
+	return result, nil
+}
+
+// walkStructFields recursively walks a struct type's fields, building up
+// JSON paths for fields tagged with openapi:"hidden".
+func walkStructFields(st *ast.StructType, prefix string, typeMap map[string]*ast.StructType, hidden map[string]bool) {
+	if st.Fields == nil {
+		return
+	}
+
+	for _, field := range st.Fields.List {
+		if field.Tag == nil {
+			continue
+		}
+
+		tag := strings.Trim(field.Tag.Value, "`")
+		jsonName := jsonFieldName(tag)
+		if jsonName == "" || jsonName == "-" {
+			continue
+		}
+
+		fieldPath := prefix + "." + jsonName
+
+		st := reflect.StructTag(tag)
+		if openapiTag, ok := st.Lookup("openapi"); ok && openapiTag == "hidden" {
+			hidden[fieldPath] = true
+			continue
+		}
+
+		// Recurse into local struct types (not hidden themselves).
+		typeName := resolveTypeName(field.Type)
+		if typeName != "" {
+			if nestedSt, ok := typeMap[typeName]; ok {
+				walkStructFields(nestedSt, fieldPath, typeMap, hidden)
+			}
+		}
+	}
+}
+
+// jsonFieldName extracts the JSON field name from a struct tag string.
+func jsonFieldName(tag string) string {
+	st := reflect.StructTag(tag)
+	jsonTag, ok := st.Lookup("json")
+	if !ok {
+		return ""
+	}
+	name, _, _ := strings.Cut(jsonTag, ",")
+	return name
+}
+
+// resolveTypeName extracts the base type name from an ast.Expr,
+// handling pointers, slices, and plain identifiers. Only returns
+// names for types defined in the same package (ast.Ident).
+func resolveTypeName(expr ast.Expr) string {
+	switch t := expr.(type) {
+	case *ast.Ident:
+		return t.Name
+	case *ast.StarExpr:
+		return resolveTypeName(t.X)
+	case *ast.ArrayType:
+		return resolveTypeName(t.Elt)
+	default:
+		return ""
+	}
 }

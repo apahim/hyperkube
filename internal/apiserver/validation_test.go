@@ -21,7 +21,7 @@ func TestValidationMiddleware_ValidPost(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	body := `{"metadata":{"name":"test"},"spec":{"clusterID":"c1","versionStreamRef":{"name":"stable"}}}`
+	body := `{"metadata":{"name":"test"},"spec":{"clusterID":"c1","versionStreamRef":{"name":"stable"},"hostedCluster":{"release":{"image":"img:v1"},"infraID":"c1","platform":{"type":"None"}}}}`
 	req := httptest.NewRequest("POST", "/v1alpha1/namespaces/default/managedhostedclusters", strings.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
@@ -39,7 +39,7 @@ func TestValidationMiddleware_MissingRequiredField(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	body := `{"metadata":{"name":"test"},"spec":{"versionStreamRef":{"name":"stable"}}}`
+	body := `{"metadata":{"name":"test"},"spec":{"versionStreamRef":{"name":"stable"},"hostedCluster":{"release":{"image":"img:v1"},"infraID":"c1","platform":{"type":"None"}}}}`
 	req := httptest.NewRequest("POST", "/v1alpha1/namespaces/default/managedhostedclusters", strings.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()

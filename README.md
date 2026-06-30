@@ -2,7 +2,7 @@
 
 A Kubernetes operator and REST API server for managing HyperShift hosted clusters on GCP. Built with [Kubebuilder](https://book.kubebuilder.io/) v4 and [controller-runtime](https://github.com/kubernetes-sigs/controller-runtime).
 
-The operator uses a **template-driven** approach: a `HostedClusterTemplate` holds a versioned Go template for a complete [HyperShift](https://github.com/openshift/hypershift) HostedCluster CR, a `VersionStream` tracks the target OCP version for groups of clusters and resolves it to a release image via the [Cincinnati update service](https://api.openshift.com/api/upgrades_info/v1/graph), and a `ManagedHostedCluster` provides per-cluster values. A dedicated controller resolves the right template, renders it with cluster-specific data (including the Cincinnati-resolved release image), and creates/owns the real HostedCluster CR.
+The operator uses a **typed spec** approach: a `ManagedHostedCluster` embeds a full [HyperShift](https://github.com/openshift/hypershift) HostedCluster spec under `.spec.hostedCluster`, a `VersionStream` tracks the target OCP version for groups of clusters and resolves it to a release image via the [Cincinnati update service](https://api.openshift.com/api/upgrades_info/v1/graph). A dedicated controller reads the embedded spec, overrides the release image with the Cincinnati-resolved value, and creates/owns the real HostedCluster CR.
 
 A **REST API server** (`cmd/apiserver/`) exposes `ManagedHostedCluster` resources over HTTP, allowing customers to create and manage clusters without direct Kubernetes API access. Each REST request is proxied to the Kubernetes API as the corresponding CR operation.
 
@@ -14,7 +14,6 @@ Each CRD has its own independent controller with configurable concurrent reconci
 
 - [Architecture](#architecture)
 - [Custom Resource Definitions](#custom-resource-definitions)
-  - [HostedClusterTemplate](#hostedclustertemplate)
   - [ManagedHostedCluster](#managedhostedcluster)
   - [VersionStream](#versionstream)
   - [UpgradeSchedule](#upgradeschedule)
@@ -55,43 +54,48 @@ Each CRD has its own independent controller with configurable concurrent reconci
                             │
                             │ queries graph
                             v
-  VersionStream (cluster-scoped)          HostedClusterTemplate (cluster-scoped)
-  ┌──────────────────────────┐            ┌──────────────────────────────────────┐
-  │ spec:                    │            │ version: "4.16"                      │
-  │   targetVersion: "4.16"  │            │ template: |                          │
-  │   channelGroup: "stable" │            │   apiVersion: hypershift.../v1beta1  │
-  │ status:                  │            │   kind: HostedCluster                │
-  │   releaseImage: quay/... │            │   spec:                              │
-  │   resolvedVersion: 4.16.3│            │     release:                         │
-  └────────────┬─────────────┘            │       image: {{ .ReleaseImage }}     │
-               │                          │     infraID: {{ .ClusterID }}        │
-               │ referenced by            │     ...                              │
-               │                          └──────────────┬─────────────────────-─┘
-  ManagedHostedCluster (namespaced)                      │
-  ┌──────────────────────────┐                           │ matched by version
-  │ clusterID: "my-cluster"  │                           │
-  │ versionStreamRef: stable │                           │
-  │ upgradeScheduleRef: ...  │                           │
-  └────────────┬─────────────┘                           │
-               │                                         │
-               └──────────┐  ┌───────────────────────────┘
-                           v  v
-               ┌───────────────────────────────────┐
-               │    HostedCluster Controller       │
-               │                                   │
-               │  1. Fetch ManagedHostedCluster     │
-               │  2. Fetch VersionStream            │
-               │  3. Wait for resolved releaseImage │
-               │  4. Find template by version       │
-               │  5. Render with ClusterID + image  │
-               │  6. Create/update HostedCluster CR │
-               └──────────────┬────────────────────┘
-                              │ creates & owns
-                              v
-               ┌───────────────────────────────────┐
-               │  HostedCluster CR (HyperShift)    │
-               │  hypershift.openshift.io/v1beta1  │
-               └───────────────────────────────────┘
+  VersionStream (cluster-scoped)
+  ┌──────────────────────────┐
+  │ spec:                    │
+  │   targetVersion: "4.16"  │
+  │   channelGroup: "stable" │
+  │ status:                  │
+  │   releaseImage: quay/... │
+  │   resolvedVersion: 4.16.3│
+  └────────────┬─────────────┘
+               │
+               │ referenced by
+               │
+  ManagedHostedCluster (namespaced)
+  ┌──────────────────────────────┐
+  │ clusterID: "my-cluster"      │
+  │ versionStreamRef: stable     │
+  │ hostedCluster:               │
+  │   release:                   │
+  │     image: quay/...          │
+  │   infraID: my-cluster        │
+  │   platform: { type: None }   │
+  │   networking: { ... }        │
+  │   etcd: { ... }              │
+  └────────────┬─────────────────┘
+               │
+               v
+  ┌───────────────────────────────────┐
+  │    HostedCluster Controller       │
+  │                                   │
+  │  1. Fetch ManagedHostedCluster    │
+  │  2. Fetch VersionStream           │
+  │  3. Wait for resolved releaseImage│
+  │  4. Build HostedCluster from spec │
+  │  5. Override release image        │
+  │  6. Create/update HostedCluster CR│
+  └──────────────┬────────────────────┘
+                 │ creates & owns
+                 v
+  ┌───────────────────────────────────┐
+  │  HostedCluster CR (HyperShift)   │
+  │  hypershift.openshift.io/v1beta1 │
+  └───────────────────────────────────┘
 ```
 
 Each controller runs in its own goroutine on a shared manager. Controllers never share a reconcile loop, so one slow controller cannot block another. `MaxConcurrentReconciles` controls how many instances of the same Kind can reconcile in parallel (the workqueue guarantees a single object is never processed concurrently by two goroutines).
@@ -102,69 +106,20 @@ Each controller runs in its own goroutine on a shared manager. Controllers never
 
 All CRDs use the API group `hcp.gcp.hypershift.openshift.com/v1alpha1`.
 
-### HostedClusterTemplate
-
-**Scope:** Cluster
-
-A versioned Go template for a complete HyperShift HostedCluster CR. Contains a raw YAML string with `{{ .Field }}` markers that are rendered with per-cluster values at reconcile time. No controller -- this is a passive data object.
-
-| Field | Type | Required | Description |
-|-------|------|----------|-------------|
-| `version` | `string` | Yes | The OCP version this template targets (e.g. `"4.16"`). The hostedcluster controller selects the template whose version matches the VersionStream's target. |
-| `template` | `string` | Yes | Raw YAML Go template for a complete HostedCluster CR spec. |
-
-**Example:**
-
-```yaml
-apiVersion: hcp.gcp.hypershift.openshift.com/v1alpha1
-kind: HostedClusterTemplate
-metadata:
-  name: gcp-standard-4-16
-spec:
-  version: "4.16"
-  template: |
-    apiVersion: hypershift.openshift.io/v1beta1
-    kind: HostedCluster
-    spec:
-      release:
-        image: "{{ .ReleaseImage }}"
-      infraID: {{ .ClusterID }}
-      platform:
-        type: None
-      etcd:
-        managementType: Managed
-        managed:
-          storage:
-            type: PersistentVolume
-      services:
-        - service: APIServer
-          servicePublishingStrategy:
-            type: LoadBalancer
-      networking:
-        clusterNetwork:
-          - cidr: 10.132.0.0/14
-        serviceNetwork:
-          - cidr: 172.31.0.0/16
-```
-
-**Available template variables:**
-
-| Variable | Source | Description |
-|----------|--------|-------------|
-| `.ClusterID` | `ManagedHostedCluster.spec.clusterID` | Unique cluster identifier |
-| `.ReleaseImage` | `VersionStream.status.releaseImage` | Release image pullspec resolved from Cincinnati |
-
 ### ManagedHostedCluster
 
 **Scope:** Namespaced
 
-Represents a managed hosted cluster. Provides cluster-specific values that are rendered into the HostedClusterTemplate. References a VersionStream to determine the target OCP version and optionally an UpgradeSchedule.
+Represents a managed hosted cluster. Embeds the full HyperShift HostedCluster configuration under `.spec.hostedCluster`. References a VersionStream to determine the target OCP version and optionally an UpgradeSchedule.
 
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
-| `clusterID` | `string` | Yes | Unique identifier for this cluster. Used as a template variable. |
+| `clusterID` | `string` | Yes | Unique identifier for this cluster. |
 | `versionStreamRef.name` | `string` | Yes | Name of the cluster-scoped VersionStream resource. |
 | `upgradeScheduleRef.name` | `string` | No | Name of an UpgradeSchedule in the same namespace. If unset, upgrades apply immediately. |
+| `hostedCluster` | `HostedClusterSpec` | Yes | HyperShift HostedCluster configuration (see below). |
+
+The `hostedCluster` field contains the full HostedCluster spec. Some fields (e.g. `platform`, `networking`, `etcd`, `services`) are internal — they exist in the CRD for Kubernetes validation but are excluded from the REST API's OpenAPI spec via the `openapi:"hidden"` struct tag mechanism.
 
 **Example:**
 
@@ -178,13 +133,42 @@ spec:
   clusterID: my-cluster-001
   versionStreamRef:
     name: stable
+  hostedCluster:
+    release:
+      image: "quay.io/openshift-release-dev/ocp-release:4.16.3-x86_64"
+    infraID: my-cluster-001
+    platform:
+      type: None
+    etcd:
+      managementType: Managed
+      managed:
+        storage:
+          type: PersistentVolume
+    services:
+      - service: APIServer
+        servicePublishingStrategy:
+          type: LoadBalancer
+      - service: OAuthServer
+        servicePublishingStrategy:
+          type: Route
+      - service: Konnectivity
+        servicePublishingStrategy:
+          type: Route
+      - service: Ignition
+        servicePublishingStrategy:
+          type: Route
+    networking:
+      clusterNetwork:
+        - cidr: 10.132.0.0/14
+      serviceNetwork:
+        - cidr: 172.31.0.0/16
 ```
 
 ### VersionStream
 
 **Scope:** Cluster
 
-Tracks the target OCP version for a group of clusters. The VersionStream controller queries the [Cincinnati update service](https://api.openshift.com/api/upgrades_info/v1/graph) to resolve the target major.minor version to the latest available patch release and its image pullspec. The resolved image is stored in `status.releaseImage` and consumed by the HostedCluster controller when rendering templates. When `targetVersion` changes, all ManagedHostedClusters referencing this stream are reconciled (subject to their UpgradeSchedule constraints).
+Tracks the target OCP version for a group of clusters. The VersionStream controller queries the [Cincinnati update service](https://api.openshift.com/api/upgrades_info/v1/graph) to resolve the target major.minor version to the latest available patch release and its image pullspec. The resolved image is stored in `status.releaseImage` and used by the HostedCluster controller to override the release image in the ManagedHostedCluster's embedded spec. When `targetVersion` changes, all ManagedHostedClusters referencing this stream are reconciled (subject to their UpgradeSchedule constraints).
 
 The controller re-checks Cincinnati every 5 minutes on success (to pick up new patch releases) and every 1 minute on failure. If Cincinnati becomes unreachable, the last successfully resolved image is preserved so downstream controllers continue to function.
 
@@ -192,7 +176,7 @@ The controller re-checks Cincinnati every 5 minutes on success (to pick up new p
 
 | Field | Type | Required | Default | Description |
 |-------|------|----------|---------|-------------|
-| `targetVersion` | `string` | Yes | | Desired OCP version as major.minor (e.g. `"4.16"`). Must match a HostedClusterTemplate's `version`. |
+| `targetVersion` | `string` | Yes | | Desired OCP version as major.minor (e.g. `"4.16"`). |
 | `channelGroup` | `string` | No | `"stable"` | Cincinnati channel group (`"stable"`, `"fast"`, `"candidate"`). |
 | `arch` | `string` | No | `"amd64"` | CPU architecture for the release image. |
 
@@ -299,20 +283,17 @@ make undeploy
 
 ### Create a Managed Cluster
 
-Apply the samples in order -- VersionStream and template first, then the ManagedHostedCluster:
+Apply the samples in order -- VersionStream first, then the ManagedHostedCluster:
 
 ```bash
 # 1. Create a VersionStream (cluster-scoped)
 kubectl apply -f config/samples/hcp_v1alpha1_versionstream.yaml
 
-# 2. Create a HostedClusterTemplate (cluster-scoped)
-kubectl apply -f config/samples/hcp_v1alpha1_hostedclustertemplate.yaml
-
-# 3. Create a ManagedHostedCluster (namespaced)
+# 2. Create a ManagedHostedCluster (namespaced)
 kubectl apply -f config/samples/hcp_v1alpha1_managedhostedcluster.yaml
 ```
 
-The VersionStream controller will query Cincinnati to resolve the target version to a release image. Once resolved, the HostedCluster controller will find the matching template, render it with the cluster's `clusterID` and the resolved `releaseImage`, and create the HyperShift HostedCluster CR.
+The VersionStream controller will query Cincinnati to resolve the target version to a release image. Once resolved, the HostedCluster controller will build a HyperShift HostedCluster CR from the embedded `.spec.hostedCluster` configuration, override the release image with the Cincinnati-resolved value, and create the CR.
 
 ---
 
@@ -361,7 +342,11 @@ curl -X POST http://localhost:8080/v1alpha1/namespaces/default/managedhostedclus
     "metadata": {"name": "my-cluster"},
     "spec": {
       "clusterID": "cluster-001",
-      "versionStreamRef": {"name": "stable"}
+      "versionStreamRef": {"name": "stable"},
+      "hostedCluster": {
+        "release": {"image": "quay.io/openshift-release-dev/ocp-release:4.16.3-x86_64"},
+        "infraID": "cluster-001"
+      }
     }
   }'
 ```
@@ -396,6 +381,8 @@ make openapi
 
 This runs `make manifests` first (to regenerate CRD YAMLs from the Go types), then extracts the `openAPIV3Schema` from each CRD and assembles them into a complete OpenAPI 3.0.3 document at `api/openapi/spec.yaml`.
 
+**Field visibility control:** Fields tagged with `openapi:"hidden"` in Go struct definitions are excluded from the generated OpenAPI spec while remaining in the CRD (so Kubernetes validates the full object). The `hack/crd-to-openapi` tool parses Go source files with `go/ast` to discover hidden fields and strips them during spec generation. This allows internal fields (e.g. `platform`, `networking`, `etcd`, `services`) to be set by controllers without exposing them to REST API consumers.
+
 The generated spec includes:
 - Schemas for exposed resource types with full validation rules (required fields, patterns, enums, defaults)
 - RESTful CRUD paths, respecting Namespaced vs Cluster scope
@@ -426,7 +413,7 @@ gcp-hcp-backend/
 │   ├── v1alpha1/                           # CRD type definitions
 │   │   ├── groupversion_info.go            # API group registration
 │   │   ├── managedhostedcluster_types.go   # ManagedHostedCluster
-│   │   ├── hostedclustertemplate_types.go  # HostedClusterTemplate
+│   │   ├── hypershift_types.go            # Vendored HyperShift HostedClusterSpec types
 │   │   ├── versionstream_types.go          # VersionStream
 │   │   ├── upgradeschedule_types.go        # UpgradeSchedule
 │   │   └── zz_generated.deepcopy.go       # auto-generated (do not edit)
@@ -447,7 +434,7 @@ gcp-hcp-backend/
 │   │   └── client_test.go                  # httptest-based tests
 │   └── controller/
 │       ├── managedhostedcluster_controller.go  # ManagedHostedCluster reconciler (scaffold)
-│       ├── hostedcluster_controller.go         # Template rendering controller
+│       ├── hostedcluster_controller.go         # HostedCluster spec-to-CR controller
 │       ├── versionstream_controller.go         # Cincinnati version resolution controller
 │       ├── upgradeschedule_controller.go       # UpgradeSchedule reconciler (scaffold)
 │       └── suite_test.go                       # envtest setup
@@ -556,13 +543,13 @@ Run `make generate manifests` and you're done.
 
 ### Upgrading HyperShift Compatibility
 
-The operator does not import HyperShift Go types into its CRD definitions. Instead, HostedCluster CRs are created as unstructured objects from rendered YAML templates. The release image is resolved automatically from Cincinnati -- it is never hardcoded in templates. To support a new OCP version:
+The operator vendors a curated subset of HyperShift types in `api/v1alpha1/hypershift_types.go` rather than importing the upstream Go module. HostedCluster CRs are built by marshaling the typed spec to an unstructured object. To support new upstream fields:
 
-1. Create a new `HostedClusterTemplate` with the new version and updated template YAML (use `{{ .ReleaseImage }}` for the release image)
-2. Update the `VersionStream` target to point to the new major.minor version
-3. The VersionStream controller will automatically resolve the latest patch release and its image from Cincinnati
-
-No Go dependency changes or recompilation are needed for template-only changes.
+1. Add the new fields to the vendored types in `hypershift_types.go`
+2. Annotate internal fields with `openapi:"hidden"` to exclude them from the REST API
+3. Run `make generate manifests openapi` to regenerate CRDs and OpenAPI spec
+4. Update the `VersionStream` target to point to the new major.minor version
+5. The VersionStream controller will automatically resolve the latest patch release and its image from Cincinnati
 
 ---
 
