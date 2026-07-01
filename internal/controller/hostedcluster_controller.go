@@ -78,7 +78,7 @@ func (r *HostedClusterReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 		return ctrl.Result{RequeueAfter: 10 * time.Second}, nil
 	}
 
-	hc, err := buildHostedCluster(&mhc, vs.Status.ReleaseImage)
+	hc, err := buildHostedCluster(&mhc, vs.Status.ReleaseImage, vs.Status.Channel)
 	if err != nil {
 		log.Error(err, "Failed to build HostedCluster from spec")
 		return ctrl.Result{}, err
@@ -114,8 +114,74 @@ func (r *HostedClusterReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 	return ctrl.Result{}, r.setCondition(ctx, &mhc, "HostedClusterCreated", metav1.ConditionTrue, "Updated", "HostedCluster CR updated successfully")
 }
 
-func buildHostedCluster(mhc *hcpv1alpha1.ManagedHostedCluster, releaseImage string) (*unstructured.Unstructured, error) {
-	specJSON, err := json.Marshal(mhc.Spec.HostedCluster)
+func populateHostedClusterSpec(spec *hcpv1alpha1.HostedClusterSpec, mhc *hcpv1alpha1.ManagedHostedCluster, channel string) {
+	spec.Platform = hcpv1alpha1.PlatformSpec{Type: "GCP"}
+
+	if spec.Networking == nil {
+		spec.Networking = &hcpv1alpha1.ClusterNetworkingSpec{
+			ClusterNetwork: []hcpv1alpha1.NetworkRange{{CIDR: "10.132.0.0/14"}},
+			ServiceNetwork: []hcpv1alpha1.NetworkRange{{CIDR: "172.31.0.0/16"}},
+			NetworkType:    "OVNKubernetes",
+		}
+	}
+
+	if spec.Etcd == nil {
+		spec.Etcd = &hcpv1alpha1.EtcdSpec{
+			ManagementType: "Managed",
+			Managed: &hcpv1alpha1.ManagedEtcdSpec{
+				Storage: hcpv1alpha1.ManagedEtcdStorageSpec{Type: "PersistentVolume"},
+			},
+		}
+	}
+
+	if spec.Services == nil {
+		spec.Services = []hcpv1alpha1.ServicePublishingStrategyMapping{
+			{Service: "APIServer", ServicePublishingStrategy: hcpv1alpha1.ServicePublishingStrategy{Type: "Route"}},
+			{Service: "OAuthServer", ServicePublishingStrategy: hcpv1alpha1.ServicePublishingStrategy{Type: "Route"}},
+			{Service: "Konnectivity", ServicePublishingStrategy: hcpv1alpha1.ServicePublishingStrategy{Type: "Route"}},
+			{Service: "Ignition", ServicePublishingStrategy: hcpv1alpha1.ServicePublishingStrategy{Type: "Route"}},
+		}
+	}
+
+	spec.ClusterID = mhc.Spec.ClusterID
+	spec.Channel = channel
+	spec.ControllerAvailabilityPolicy = "HighlyAvailable"
+	spec.PullSecret = &hcpv1alpha1.SecretReference{Name: "pull-secret"}
+	spec.ServiceAccountSigningKey = &hcpv1alpha1.SecretReference{Name: mhc.Name + "-signing-key"}
+
+	if spec.Capabilities == nil {
+		spec.Capabilities = &hcpv1alpha1.CapabilitiesSpec{
+			Disabled: []string{"ImageRegistry", "Console", "Ingress"},
+		}
+	}
+
+	if spec.Configuration == nil {
+		spec.Configuration = &hcpv1alpha1.ClusterConfiguration{
+			Authentication: &hcpv1alpha1.AuthenticationConfig{
+				Type: "OIDC",
+				OIDCProviders: []hcpv1alpha1.OIDCProvider{
+					{
+						Name: "google",
+						Issuer: hcpv1alpha1.OIDCIssuer{
+							IssuerURL: "https://accounts.google.com",
+							Audiences: []string{"32555940559.apps.googleusercontent.com"},
+						},
+						ClaimMappings: hcpv1alpha1.ClaimMappings{
+							Username: hcpv1alpha1.ClaimMapping{Claim: "email"},
+							Groups:   &hcpv1alpha1.ClaimMapping{Claim: "hd", Prefix: ""},
+						},
+					},
+				},
+			},
+		}
+	}
+}
+
+func buildHostedCluster(mhc *hcpv1alpha1.ManagedHostedCluster, releaseImage, channel string) (*unstructured.Unstructured, error) {
+	spec := mhc.Spec.HostedCluster
+	populateHostedClusterSpec(&spec, mhc, channel)
+
+	specJSON, err := json.Marshal(spec)
 	if err != nil {
 		return nil, fmt.Errorf("marshaling hosted cluster spec: %w", err)
 	}
@@ -136,7 +202,13 @@ func buildHostedCluster(mhc *hcpv1alpha1.ManagedHostedCluster, releaseImage stri
 		Object: map[string]any{
 			"apiVersion": hostedClusterGVK.Group + "/" + hostedClusterGVK.Version,
 			"kind":       hostedClusterGVK.Kind,
-			"spec":       specMap,
+			"metadata": map[string]any{
+				"annotations": map[string]any{
+					"hypershift.openshift.io/pod-security-admission-label-override": "baseline",
+					"hypershift.openshift.io/skip-kas-conflict-san-validation":      "true",
+				},
+			},
+			"spec": specMap,
 		},
 	}
 

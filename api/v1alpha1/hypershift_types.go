@@ -43,6 +43,34 @@ type HostedClusterSpec struct {
 	// services defines the service publishing strategy for control plane services.
 	// +optional
 	Services []ServicePublishingStrategyMapping `json:"services,omitempty" openapi:"hidden"`
+
+	// channel is the Cincinnati release channel (e.g. "stable-4.16").
+	// +optional
+	Channel string `json:"channel,omitempty" openapi:"hidden"`
+
+	// controllerAvailabilityPolicy specifies the availability policy for control plane controllers.
+	// +optional
+	ControllerAvailabilityPolicy string `json:"controllerAvailabilityPolicy,omitempty" openapi:"hidden"`
+
+	// pullSecret references the Secret containing the pull secret for the cluster.
+	// +optional
+	PullSecret *SecretReference `json:"pullSecret,omitempty" openapi:"hidden"`
+
+	// serviceAccountSigningKey references the Secret containing the service account signing key.
+	// +optional
+	ServiceAccountSigningKey *SecretReference `json:"serviceAccountSigningKey,omitempty" openapi:"hidden"`
+
+	// clusterID is the unique cluster identifier passed to the HostedCluster CR.
+	// +optional
+	ClusterID string `json:"clusterID,omitempty" openapi:"hidden"`
+
+	// capabilities defines which cluster capabilities are enabled or disabled.
+	// +optional
+	Capabilities *CapabilitiesSpec `json:"capabilities,omitempty" openapi:"hidden"`
+
+	// configuration defines cluster-level configuration (authentication, API server, etc.).
+	// +optional
+	Configuration *ClusterConfiguration `json:"configuration,omitempty" openapi:"hidden"`
 }
 
 // ReleaseSpec defines the target OCP release.
@@ -68,6 +96,10 @@ type ClusterNetworkingSpec struct {
 	// serviceNetwork is the list of IP address pools for service IPs.
 	// +optional
 	ServiceNetwork []NetworkRange `json:"serviceNetwork,omitempty"`
+
+	// networkType is the CNI plugin type (e.g. "OVNKubernetes", "OpenShiftSDN").
+	// +optional
+	NetworkType string `json:"networkType,omitempty"`
 }
 
 // NetworkRange defines a network CIDR range.
@@ -118,4 +150,84 @@ type ServicePublishingStrategy struct {
 	// type is the publishing strategy (e.g. "LoadBalancer", "Route", "NodePort").
 	// +required
 	Type string `json:"type"`
+}
+
+// SecretReference is a reference to a Secret by name.
+type SecretReference struct {
+	// name is the name of the Secret.
+	// +required
+	Name string `json:"name"`
+}
+
+// CapabilitiesSpec defines which cluster capabilities are enabled or disabled.
+type CapabilitiesSpec struct {
+	// disabled is the list of cluster capabilities to disable.
+	// +optional
+	Disabled []string `json:"disabled,omitempty"`
+}
+
+// ClusterConfiguration defines cluster-level configuration.
+type ClusterConfiguration struct {
+	// authentication defines the authentication configuration for the cluster.
+	// +optional
+	Authentication *AuthenticationConfig `json:"authentication,omitempty"`
+}
+
+// AuthenticationConfig defines authentication settings.
+type AuthenticationConfig struct {
+	// type is the authentication type (e.g. "OIDC").
+	// +optional
+	Type string `json:"type,omitempty"`
+
+	// oidcProviders defines the OIDC identity providers for the cluster.
+	// +optional
+	OIDCProviders []OIDCProvider `json:"oidcProviders,omitempty"`
+}
+
+// OIDCProvider defines an OIDC identity provider configuration.
+type OIDCProvider struct {
+	// name is the name of the OIDC provider.
+	// +required
+	Name string `json:"name"`
+
+	// issuer defines the OIDC issuer configuration.
+	// +required
+	Issuer OIDCIssuer `json:"issuer"`
+
+	// claimMappings defines how OIDC claims are mapped to Kubernetes identities.
+	// +required
+	ClaimMappings ClaimMappings `json:"claimMappings"`
+}
+
+// OIDCIssuer defines the OIDC issuer endpoint.
+type OIDCIssuer struct {
+	// issuerURL is the URL of the OIDC issuer.
+	// +required
+	IssuerURL string `json:"issuerURL"`
+
+	// audiences is the list of valid audiences for tokens issued by this provider.
+	// +optional
+	Audiences []string `json:"audiences,omitempty"`
+}
+
+// ClaimMappings defines how OIDC claims map to Kubernetes identities.
+type ClaimMappings struct {
+	// username defines the claim used for the Kubernetes username.
+	// +required
+	Username ClaimMapping `json:"username"`
+
+	// groups defines the claim used for Kubernetes group membership.
+	// +optional
+	Groups *ClaimMapping `json:"groups,omitempty"`
+}
+
+// ClaimMapping defines how a single OIDC claim is mapped.
+type ClaimMapping struct {
+	// claim is the name of the OIDC claim.
+	// +required
+	Claim string `json:"claim"`
+
+	// prefix is prepended to claim values.
+	// +optional
+	Prefix string `json:"prefix,omitempty"`
 }

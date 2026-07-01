@@ -47,6 +47,110 @@ spec:
                 description: hostedCluster defines the HyperShift HostedCluster configuration
                   for this cluster.
                 properties:
+                  capabilities:
+                    description: capabilities defines which cluster capabilities are
+                      enabled or disabled.
+                    properties:
+                      disabled:
+                        description: disabled is the list of cluster capabilities
+                          to disable.
+                        items:
+                          type: string
+                        type: array
+                    type: object
+                  channel:
+                    description: channel is the Cincinnati release channel (e.g. "stable-4.16").
+                    type: string
+                  clusterID:
+                    description: clusterID is the unique cluster identifier passed
+                      to the HostedCluster CR.
+                    type: string
+                  configuration:
+                    description: configuration defines cluster-level configuration
+                      (authentication, API server, etc.).
+                    properties:
+                      authentication:
+                        description: authentication defines the authentication configuration
+                          for the cluster.
+                        properties:
+                          oidcProviders:
+                            description: oidcProviders defines the OIDC identity providers
+                              for the cluster.
+                            items:
+                              description: OIDCProvider defines an OIDC identity provider
+                                configuration.
+                              properties:
+                                claimMappings:
+                                  description: claimMappings defines how OIDC claims
+                                    are mapped to Kubernetes identities.
+                                  properties:
+                                    groups:
+                                      description: groups defines the claim used for
+                                        Kubernetes group membership.
+                                      properties:
+                                        claim:
+                                          description: claim is the name of the OIDC
+                                            claim.
+                                          type: string
+                                        prefix:
+                                          description: prefix is prepended to claim
+                                            values.
+                                          type: string
+                                      required:
+                                      - claim
+                                      type: object
+                                    username:
+                                      description: username defines the claim used
+                                        for the Kubernetes username.
+                                      properties:
+                                        claim:
+                                          description: claim is the name of the OIDC
+                                            claim.
+                                          type: string
+                                        prefix:
+                                          description: prefix is prepended to claim
+                                            values.
+                                          type: string
+                                      required:
+                                      - claim
+                                      type: object
+                                  required:
+                                  - username
+                                  type: object
+                                issuer:
+                                  description: issuer defines the OIDC issuer configuration.
+                                  properties:
+                                    audiences:
+                                      description: audiences is the list of valid
+                                        audiences for tokens issued by this provider.
+                                      items:
+                                        type: string
+                                      type: array
+                                    issuerURL:
+                                      description: issuerURL is the URL of the OIDC
+                                        issuer.
+                                      type: string
+                                  required:
+                                  - issuerURL
+                                  type: object
+                                name:
+                                  description: name is the name of the OIDC provider.
+                                  type: string
+                              required:
+                              - claimMappings
+                              - issuer
+                              - name
+                              type: object
+                            type: array
+                          type:
+                            description: type is the authentication type (e.g. "OIDC").
+                            type: string
+                        type: object
+                    type: object
+                  controllerAvailabilityPolicy:
+                    description: controllerAvailabilityPolicy specifies the availability
+                      policy for control plane controllers.
+                    type: string
                   etcd:
                     description: etcd defines the etcd configuration for the hosted
                       control plane.
@@ -98,6 +202,10 @@ spec:
                           - cidr
                           type: object
                         type: array
+                      networkType:
+                        description: networkType is the CNI plugin type (e.g. "OVNKubernetes",
+                          "OpenShiftSDN").
+                        type: string
                       serviceNetwork:
                         description: serviceNetwork is the list of IP address pools
                           for service IPs.
@@ -124,6 +232,16 @@ spec:
                     required:
                     - type
                     type: object
+                  pullSecret:
+                    description: pullSecret references the Secret containing the pull
+                      secret for the cluster.
+                    properties:
+                      name:
+                        description: name is the name of the Secret.
+                        type: string
+                    required:
+                    - name
+                    type: object
                   release:
                     description: release specifies the OCP release image for the hosted
                       cluster.
@@ -133,6 +251,16 @@ spec:
                         type: string
                     required:
                     - image
+                    type: object
+                  serviceAccountSigningKey:
+                    description: serviceAccountSigningKey references the Secret containing
+                      the service account signing key.
+                    properties:
+                      name:
+                        description: name is the name of the Secret.
+                        type: string
+                    required:
+                    - name
                     type: object
                   services:
                     description: services defines the service publishing strategy
