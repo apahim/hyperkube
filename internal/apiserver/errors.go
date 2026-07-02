@@ -20,25 +20,19 @@ import (
 	"encoding/json"
 	"net/http"
 
-	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	"github.com/gcp-hcp/gcp-hcp-backend/internal/desires"
 )
 
 func writeError(w http.ResponseWriter, err error) {
 	code := http.StatusInternalServerError
 
 	switch {
-	case apierrors.IsNotFound(err):
+	case desires.IsNotFoundError(err):
 		code = http.StatusNotFound
-	case apierrors.IsAlreadyExists(err):
+	case desires.IsAlreadyExistsError(err):
 		code = http.StatusConflict
-	case apierrors.IsConflict(err):
+	case desires.IsPreconditionFailedError(err):
 		code = http.StatusConflict
-	case apierrors.IsForbidden(err):
-		code = http.StatusForbidden
-	case apierrors.IsInvalid(err):
-		code = http.StatusUnprocessableEntity
-	case apierrors.IsBadRequest(err):
-		code = http.StatusBadRequest
 	}
 
 	writeErrorMsg(w, code, err.Error())

@@ -4,31 +4,7 @@ import (
 	"context"
 	"strings"
 	"testing"
-
-	corev1 "k8s.io/api/core/v1"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/runtime"
-	"sigs.k8s.io/controller-runtime/pkg/client/fake"
-
-	hcpv1alpha1 "github.com/gcp-hcp/gcp-hcp-backend/api/v1alpha1"
 )
-
-func newTestStore(t *testing.T) *Store {
-	t.Helper()
-	scheme := runtime.NewScheme()
-	if err := corev1.AddToScheme(scheme); err != nil {
-		t.Fatal(err)
-	}
-	if err := hcpv1alpha1.AddToScheme(scheme); err != nil {
-		t.Fatal(err)
-	}
-	fakeClient := fake.NewClientBuilder().WithScheme(scheme).Build()
-	store, err := NewStore(fakeClient, "cedar-policies", "")
-	if err != nil {
-		t.Fatal(err)
-	}
-	return store
-}
 
 func TestStoreListTemplates(t *testing.T) {
 	store := newTestStore(t)
@@ -176,19 +152,8 @@ func TestResolvePolicies_CustomRole(t *testing.T) {
 	store := newTestStore(t)
 	ctx := context.Background()
 
-	role := &hcpv1alpha1.CustomRole{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      "custom-reader",
-			Namespace: "my-project",
-		},
-		Spec: hcpv1alpha1.CustomRoleSpec{
-			Permissions: []string{"cluster.get", "cluster.list"},
-			Description: "Custom read-only role",
-		},
-	}
-	if err := store.client.Create(ctx, role); err != nil {
-		t.Fatal(err)
-	}
+	seedCustomRole(t, store, "my-project", "custom-reader",
+		[]string{"cluster.get", "cluster.list"}, nil)
 
 	_, err := store.CreateAttachment(ctx, "my-project", "custom-reader", "alice")
 	if err != nil {
@@ -214,19 +179,9 @@ func TestResolvePolicies_CustomRoleWithConditions(t *testing.T) {
 	store := newTestStore(t)
 	ctx := context.Background()
 
-	role := &hcpv1alpha1.CustomRole{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      "regional-viewer",
-			Namespace: "my-project",
-		},
-		Spec: hcpv1alpha1.CustomRoleSpec{
-			Permissions: []string{"cluster.list", "cluster.get"},
-			Conditions:  []string{`resource.labels.region == "us-east1"`},
-		},
-	}
-	if err := store.client.Create(ctx, role); err != nil {
-		t.Fatal(err)
-	}
+	seedCustomRole(t, store, "my-project", "regional-viewer",
+		[]string{"cluster.list", "cluster.get"},
+		[]string{`resource.labels.region == "us-east1"`})
 
 	_, err := store.CreateAttachment(ctx, "my-project", "regional-viewer", "alice")
 	if err != nil {
@@ -254,22 +209,11 @@ func TestResolvePolicies_WithGlobalPolicies(t *testing.T) {
 	store := newTestStore(t)
 	ctx := context.Background()
 
-	globalCM := &corev1.ConfigMap{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      DefaultGlobalPolicyCM,
-			Namespace: "cedar-policies",
-		},
-		Data: map[string]string{
-			globalPoliciesKey: `permit (
+	seedGlobalPolicies(t, store, `permit (
     principal == HCP::User::"bootstrap-sa",
     action == HCP::Action::"ManagePolicies",
     resource
-);`,
-		},
-	}
-	if err := store.client.Create(ctx, globalCM); err != nil {
-		t.Fatal(err)
-	}
+);`)
 
 	result, err := store.ResolvePolicies(ctx, "fresh-project")
 	if err != nil {
@@ -303,22 +247,11 @@ func TestResolvePolicies_GlobalAndProjectPolicies(t *testing.T) {
 	store := newTestStore(t)
 	ctx := context.Background()
 
-	globalCM := &corev1.ConfigMap{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      DefaultGlobalPolicyCM,
-			Namespace: "cedar-policies",
-		},
-		Data: map[string]string{
-			globalPoliciesKey: `permit (
+	seedGlobalPolicies(t, store, `permit (
     principal == HCP::User::"bootstrap-sa",
     action == HCP::Action::"ManagePolicies",
     resource
-);`,
-		},
-	}
-	if err := store.client.Create(ctx, globalCM); err != nil {
-		t.Fatal(err)
-	}
+);`)
 
 	_, err := store.CreateAttachment(ctx, "my-project", "cluster-viewer", "alice")
 	if err != nil {
@@ -341,19 +274,8 @@ func TestListRoles(t *testing.T) {
 	store := newTestStore(t)
 	ctx := context.Background()
 
-	role := &hcpv1alpha1.CustomRole{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      "my-custom-role",
-			Namespace: "my-project",
-		},
-		Spec: hcpv1alpha1.CustomRoleSpec{
-			Permissions: []string{"cluster.get"},
-			Description: "test custom role",
-		},
-	}
-	if err := store.client.Create(ctx, role); err != nil {
-		t.Fatal(err)
-	}
+	seedCustomRole(t, store, "my-project", "my-custom-role",
+		[]string{"cluster.get"}, nil)
 
 	roles, err := store.ListRoles(ctx, "my-project")
 	if err != nil {
@@ -461,5 +383,46 @@ func TestGeneratePolicyFromPermissions_ResourceOnly(t *testing.T) {
 	}
 	if !strings.Contains(policy, "when") {
 		t.Error("resource-only policy should have conditions")
+	}
+}
+
+func TestUserProjectsIndex(t *testing.T) {
+	store := newTestStore(t)
+	ctx := context.Background()
+
+	_, err := store.CreateAttachment(ctx, "project-a", "cluster-viewer", "alice")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = store.CreateAttachment(ctx, "project-b", "cluster-admin", "alice")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	projects, err := store.ListUserProjects(ctx, "alice")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(projects) != 2 {
+		t.Fatalf("expected 2 projects, got %d", len(projects))
+	}
+
+	att, err := store.ListAttachments(ctx, "project-a")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := store.DeleteAttachment(ctx, "project-a", att[0].ID); err != nil {
+		t.Fatal(err)
+	}
+
+	projects, err = store.ListUserProjects(ctx, "alice")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(projects) != 1 {
+		t.Fatalf("expected 1 project after removing project-a, got %d", len(projects))
+	}
+	if projects[0] != "project-b" {
+		t.Errorf("expected remaining project to be project-b, got %q", projects[0])
 	}
 }

@@ -1,5 +1,21 @@
 components:
   schemas:
+    ApplyDesireConditionStatus:
+      description: Status of the ApplyDesire (kube-applier apply reconciliation)
+      properties:
+        appliedResourceGeneration:
+          description: The K8s resource generation that the kube-applier last applied
+          format: int64
+          type: integer
+        conditions:
+          items:
+            $ref: '#/components/schemas/Condition'
+          type: array
+        observedDesireUpdateTime:
+          description: Timestamp of the desire document the agent last processed
+          format: date-time
+          type: string
+      type: object
     Condition:
       description: Standard Kubernetes condition
       properties:
@@ -31,10 +47,32 @@ components:
       - message
       - lastTransitionTime
       type: object
+    DesireConditionStatus:
+      description: Status of a desire (kube-applier reconciliation)
+      properties:
+        conditions:
+          items:
+            $ref: '#/components/schemas/Condition'
+          type: array
+        observedDesireUpdateTime:
+          description: Timestamp of the desire document the agent last processed
+          format: date-time
+          type: string
+      type: object
+    DesireStatus:
+      description: Aggregated status from the kube-applier desire pipeline
+      properties:
+        apply:
+          $ref: '#/components/schemas/ApplyDesireConditionStatus'
+        read:
+          $ref: '#/components/schemas/DesireConditionStatus'
+      type: object
     ManagedHostedCluster:
       description: ManagedHostedCluster is the Schema for the managedhostedclusters
         API
       properties:
+        desireStatus:
+          $ref: '#/components/schemas/DesireStatus'
         metadata:
           $ref: '#/components/schemas/ObjectMeta'
         spec:

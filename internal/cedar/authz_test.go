@@ -7,33 +7,17 @@ import (
 	"testing"
 	"time"
 
-	corev1 "k8s.io/api/core/v1"
-	"k8s.io/apimachinery/pkg/runtime"
-	"sigs.k8s.io/controller-runtime/pkg/client/fake"
-
-	hcpv1alpha1 "github.com/gcp-hcp/gcp-hcp-backend/api/v1alpha1"
 	"github.com/go-jose/go-jose/v4/jwt"
 )
 
 func newAuthzTestSetup(t *testing.T) (*AuthzMiddleware, *testJWKS) {
 	t.Helper()
-	scheme := runtime.NewScheme()
-	if err := corev1.AddToScheme(scheme); err != nil {
-		t.Fatal(err)
-	}
-	if err := hcpv1alpha1.AddToScheme(scheme); err != nil {
-		t.Fatal(err)
-	}
-	fakeClient := fake.NewClientBuilder().WithScheme(scheme).Build()
-	store, err := NewStore(fakeClient, "cedar-policies", "")
-	if err != nil {
-		t.Fatal(err)
-	}
+	store := newTestStore(t)
 
 	tj := newTestJWKS(t)
 	validator := NewJWTValidatorWithURL(tj.server.URL)
 
-	mw := NewAuthzMiddleware(store, validator, fakeClient)
+	mw := NewAuthzMiddleware(store, validator, nil, nil)
 	return mw, tj
 }
 

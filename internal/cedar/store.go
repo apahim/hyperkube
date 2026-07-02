@@ -9,19 +9,23 @@ import (
 	"strings"
 	"time"
 
+	"cloud.google.com/go/firestore"
 	"github.com/google/uuid"
-	corev1 "k8s.io/api/core/v1"
-	"k8s.io/apimachinery/pkg/api/errors"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"sigs.k8s.io/controller-runtime/pkg/client"
-
-	hcpv1alpha1 "github.com/gcp-hcp/gcp-hcp-backend/api/v1alpha1"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 )
 
 const (
 	attachmentsKey        = "attachments.json"
 	globalPoliciesKey     = "policies.cedar"
 	DefaultGlobalPolicyCM = "cedar-global-policies"
+
+	collectionAttachments    = "attachments"
+	collectionGlobalPolicies = "global-policies"
+	collectionCustomRoles    = "custom-roles"
+	collectionUserProjects   = "user-projects"
+
+	globalPoliciesDocID = "default"
 )
 
 type Template struct {
@@ -36,26 +40,31 @@ type Attachment struct {
 	CreatedAt    string `json:"created_at"`
 }
 
-type Store struct {
-	client                client.Client
-	namespace             string
-	templates             map[string]Template
-	globalPolicyConfigMap string
+// customRoleDoc is the Firestore document schema for custom roles.
+type customRoleDoc struct {
+	Permissions []string `firestore:"permissions" json:"permissions"`
+	Description string   `firestore:"description,omitempty" json:"description,omitempty"`
+	Conditions  []string `firestore:"conditions,omitempty" json:"conditions,omitempty"`
 }
 
-func NewStore(k8sClient client.Client, namespace, globalPolicyConfigMap string) (*Store, error) {
+// userProjectsDoc is the Firestore document schema for the user-projects reverse index.
+type userProjectsDoc struct {
+	Projects []string `firestore:"projects" json:"projects"`
+}
+
+type Store struct {
+	fsClient  *firestore.Client
+	templates map[string]Template
+}
+
+func NewStore(fsClient *firestore.Client) (*Store, error) {
 	templates, err := loadTemplates()
 	if err != nil {
 		return nil, fmt.Errorf("loading templates: %w", err)
 	}
-	if globalPolicyConfigMap == "" {
-		globalPolicyConfigMap = DefaultGlobalPolicyCM
-	}
 	return &Store{
-		client:                k8sClient,
-		namespace:             namespace,
-		templates:             templates,
-		globalPolicyConfigMap: globalPolicyConfigMap,
+		fsClient:  fsClient,
+		templates: templates,
 	}, nil
 }
 
@@ -96,27 +105,32 @@ func (s *Store) GetTemplate(name string) (Template, bool) {
 	return t, ok
 }
 
-func configMapName(projectID string) string {
-	return "cedar-attachments-" + projectID
+func customRoleDocID(projectID, roleName string) string {
+	return projectID + ":" + roleName
 }
 
 func (s *Store) getAttachments(ctx context.Context, projectID string) ([]Attachment, error) {
-	var cm corev1.ConfigMap
-	err := s.client.Get(ctx, client.ObjectKey{Namespace: s.namespace, Name: configMapName(projectID)}, &cm)
-	if errors.IsNotFound(err) {
+	snap, err := s.fsClient.Collection(collectionAttachments).Doc(projectID).Get(ctx)
+	if status.Code(err) == codes.NotFound {
 		return nil, nil
 	}
 	if err != nil {
 		return nil, err
 	}
 
-	data, ok := cm.Data[attachmentsKey]
-	if !ok || data == "" {
+	data := snap.Data()
+	raw, ok := data[attachmentsKey]
+	if !ok {
+		return nil, nil
+	}
+
+	jsonStr, ok := raw.(string)
+	if !ok || jsonStr == "" {
 		return nil, nil
 	}
 
 	var attachments []Attachment
-	if err := json.Unmarshal([]byte(data), &attachments); err != nil {
+	if err := json.Unmarshal([]byte(jsonStr), &attachments); err != nil {
 		return nil, fmt.Errorf("decoding attachments: %w", err)
 	}
 	return attachments, nil
@@ -149,19 +163,29 @@ func (s *Store) CreateAttachment(ctx context.Context, projectID, templateName, u
 	if err := s.saveAttachments(ctx, projectID, attachments); err != nil {
 		return Attachment{}, err
 	}
+
+	if err := s.addUserProject(ctx, userID, projectID); err != nil {
+		return Attachment{}, fmt.Errorf("updating user-projects index: %w", err)
+	}
+
 	return att, nil
 }
 
 func (s *Store) validateCustomRole(ctx context.Context, projectID, roleName string) error {
-	var role hcpv1alpha1.CustomRole
-	err := s.client.Get(ctx, client.ObjectKey{Namespace: projectID, Name: roleName}, &role)
-	if errors.IsNotFound(err) {
+	docID := customRoleDocID(projectID, roleName)
+	snap, err := s.fsClient.Collection(collectionCustomRoles).Doc(docID).Get(ctx)
+	if status.Code(err) == codes.NotFound {
 		return fmt.Errorf("template %q not found", roleName)
 	}
 	if err != nil {
 		return fmt.Errorf("looking up custom role %q: %w", roleName, err)
 	}
-	return ValidatePermissions(role.Spec.Permissions)
+
+	var role customRoleDoc
+	if err := snap.DataTo(&role); err != nil {
+		return fmt.Errorf("deserializing custom role %q: %w", roleName, err)
+	}
+	return ValidatePermissions(role.Permissions)
 }
 
 func (s *Store) DeleteAttachment(ctx context.Context, projectID, attachmentID string) error {
@@ -170,11 +194,13 @@ func (s *Store) DeleteAttachment(ctx context.Context, projectID, attachmentID st
 		return err
 	}
 
+	var deletedUserID string
 	filtered := make([]Attachment, 0, len(attachments))
 	found := false
 	for _, a := range attachments {
 		if a.ID == attachmentID {
 			found = true
+			deletedUserID = a.Principal
 			continue
 		}
 		filtered = append(filtered, a)
@@ -183,7 +209,25 @@ func (s *Store) DeleteAttachment(ctx context.Context, projectID, attachmentID st
 		return fmt.Errorf("attachment %q not found", attachmentID)
 	}
 
-	return s.saveAttachments(ctx, projectID, filtered)
+	if err := s.saveAttachments(ctx, projectID, filtered); err != nil {
+		return err
+	}
+
+	// Check if user still has attachments for this project.
+	hasRemaining := false
+	for _, a := range filtered {
+		if a.Principal == deletedUserID {
+			hasRemaining = true
+			break
+		}
+	}
+	if !hasRemaining && deletedUserID != "" {
+		if err := s.removeUserProject(ctx, deletedUserID, projectID); err != nil {
+			return fmt.Errorf("updating user-projects index: %w", err)
+		}
+	}
+
+	return nil
 }
 
 func (s *Store) saveAttachments(ctx context.Context, projectID string, attachments []Attachment) error {
@@ -191,32 +235,10 @@ func (s *Store) saveAttachments(ctx context.Context, projectID string, attachmen
 	if err != nil {
 		return err
 	}
-
-	cmName := configMapName(projectID)
-	var cm corev1.ConfigMap
-	err = s.client.Get(ctx, client.ObjectKey{Namespace: s.namespace, Name: cmName}, &cm)
-
-	if errors.IsNotFound(err) {
-		cm = corev1.ConfigMap{
-			ObjectMeta: metav1.ObjectMeta{
-				Name:      cmName,
-				Namespace: s.namespace,
-			},
-			Data: map[string]string{
-				attachmentsKey: string(data),
-			},
-		}
-		return s.client.Create(ctx, &cm)
-	}
-	if err != nil {
-		return err
-	}
-
-	if cm.Data == nil {
-		cm.Data = make(map[string]string)
-	}
-	cm.Data[attachmentsKey] = string(data)
-	return s.client.Update(ctx, &cm)
+	_, err = s.fsClient.Collection(collectionAttachments).Doc(projectID).Set(ctx, map[string]any{
+		attachmentsKey: string(data),
+	})
+	return err
 }
 
 func (s *Store) ResolvePolicies(ctx context.Context, projectID string) (string, error) {
@@ -249,15 +271,13 @@ func (s *Store) ResolvePolicies(ctx context.Context, projectID string) (string, 
 }
 
 func (s *Store) loadGlobalPolicies(ctx context.Context) string {
-	var cm corev1.ConfigMap
-	err := s.client.Get(ctx, client.ObjectKey{
-		Namespace: s.namespace,
-		Name:      s.globalPolicyConfigMap,
-	}, &cm)
+	snap, err := s.fsClient.Collection(collectionGlobalPolicies).Doc(globalPoliciesDocID).Get(ctx)
 	if err != nil {
 		return ""
 	}
-	return cm.Data[globalPoliciesKey]
+	data := snap.Data()
+	policies, _ := data[globalPoliciesKey].(string)
+	return policies
 }
 
 func (s *Store) resolveAttachmentPolicy(ctx context.Context, att Attachment, projectID string) (string, error) {
@@ -268,13 +288,18 @@ func (s *Store) resolveAttachmentPolicy(ctx context.Context, att Attachment, pro
 		return policy, nil
 	}
 
-	var role hcpv1alpha1.CustomRole
-	err := s.client.Get(ctx, client.ObjectKey{Namespace: projectID, Name: att.TemplateName}, &role)
+	docID := customRoleDocID(projectID, att.TemplateName)
+	snap, err := s.fsClient.Collection(collectionCustomRoles).Doc(docID).Get(ctx)
 	if err != nil {
 		return "", fmt.Errorf("custom role %q not found: %w", att.TemplateName, err)
 	}
 
-	return GeneratePolicyFromPermissions(role.Spec.Permissions, role.Spec.Conditions, att.Principal, projectID), nil
+	var role customRoleDoc
+	if err := snap.DataTo(&role); err != nil {
+		return "", fmt.Errorf("deserializing custom role %q: %w", att.TemplateName, err)
+	}
+
+	return GeneratePolicyFromPermissions(role.Permissions, role.Conditions, att.Principal, projectID), nil
 }
 
 func GeneratePolicyFromPermissions(permissions, conditions []string, principal, projectID string) string {
@@ -320,15 +345,24 @@ type Role struct {
 func (s *Store) ListRoles(ctx context.Context, projectID string) ([]Role, error) {
 	roles := s.predefinedRoles()
 
-	var customRoles hcpv1alpha1.CustomRoleList
-	if err := s.client.List(ctx, &customRoles, client.InNamespace(projectID)); err != nil {
+	prefix := projectID + ":"
+	snaps, err := s.fsClient.Collection(collectionCustomRoles).Documents(ctx).GetAll()
+	if err != nil {
 		return roles, nil
 	}
-	for _, cr := range customRoles.Items {
+	for _, snap := range snaps {
+		if !strings.HasPrefix(snap.Ref.ID, prefix) {
+			continue
+		}
+		var role customRoleDoc
+		if err := snap.DataTo(&role); err != nil {
+			continue
+		}
+		roleName := strings.TrimPrefix(snap.Ref.ID, prefix)
 		roles = append(roles, Role{
-			Name:        cr.Name,
-			Permissions: cr.Spec.Permissions,
-			Description: cr.Spec.Description,
+			Name:        roleName,
+			Permissions: role.Permissions,
+			Description: role.Description,
 			Predefined:  false,
 		})
 	}
@@ -343,16 +377,22 @@ func (s *Store) GetRole(ctx context.Context, name, projectID string) (Role, bool
 		}
 	}
 
-	var cr hcpv1alpha1.CustomRole
-	if err := s.client.Get(ctx, client.ObjectKey{Namespace: projectID, Name: name}, &cr); err == nil {
-		return Role{
-			Name:        cr.Name,
-			Permissions: cr.Spec.Permissions,
-			Description: cr.Spec.Description,
-			Predefined:  false,
-		}, true
+	docID := customRoleDocID(projectID, name)
+	snap, err := s.fsClient.Collection(collectionCustomRoles).Doc(docID).Get(ctx)
+	if err != nil {
+		return Role{}, false
 	}
-	return Role{}, false
+
+	var role customRoleDoc
+	if err := snap.DataTo(&role); err != nil {
+		return Role{}, false
+	}
+	return Role{
+		Name:        name,
+		Permissions: role.Permissions,
+		Description: role.Description,
+		Predefined:  false,
+	}, true
 }
 
 func (s *Store) predefinedRoles() []Role {
@@ -371,4 +411,72 @@ func (s *Store) predefinedRoles() []Role {
 		})
 	}
 	return roles
+}
+
+// ListUserProjects returns the list of project IDs the user has access to.
+func (s *Store) ListUserProjects(ctx context.Context, userID string) ([]string, error) {
+	snap, err := s.fsClient.Collection(collectionUserProjects).Doc(userID).Get(ctx)
+	if status.Code(err) == codes.NotFound {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("get user-projects for %s: %w", userID, err)
+	}
+	var doc userProjectsDoc
+	if err := snap.DataTo(&doc); err != nil {
+		return nil, fmt.Errorf("deserialize user-projects for %s: %w", userID, err)
+	}
+	return doc.Projects, nil
+}
+
+func (s *Store) addUserProject(ctx context.Context, userID, projectID string) error {
+	ref := s.fsClient.Collection(collectionUserProjects).Doc(userID)
+	return s.fsClient.RunTransaction(ctx, func(ctx context.Context, tx *firestore.Transaction) error {
+		snap, err := tx.Get(ref)
+		if status.Code(err) == codes.NotFound {
+			return tx.Set(ref, userProjectsDoc{Projects: []string{projectID}})
+		}
+		if err != nil {
+			return err
+		}
+		var doc userProjectsDoc
+		if err := snap.DataTo(&doc); err != nil {
+			return err
+		}
+		for _, p := range doc.Projects {
+			if p == projectID {
+				return nil
+			}
+		}
+		doc.Projects = append(doc.Projects, projectID)
+		return tx.Set(ref, doc)
+	})
+}
+
+func (s *Store) removeUserProject(ctx context.Context, userID, projectID string) error {
+	ref := s.fsClient.Collection(collectionUserProjects).Doc(userID)
+	return s.fsClient.RunTransaction(ctx, func(ctx context.Context, tx *firestore.Transaction) error {
+		snap, err := tx.Get(ref)
+		if status.Code(err) == codes.NotFound {
+			return nil
+		}
+		if err != nil {
+			return err
+		}
+		var doc userProjectsDoc
+		if err := snap.DataTo(&doc); err != nil {
+			return err
+		}
+		filtered := make([]string, 0, len(doc.Projects))
+		for _, p := range doc.Projects {
+			if p != projectID {
+				filtered = append(filtered, p)
+			}
+		}
+		if len(filtered) == 0 {
+			return tx.Delete(ref)
+		}
+		doc.Projects = filtered
+		return tx.Set(ref, doc)
+	})
 }

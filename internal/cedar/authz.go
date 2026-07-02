@@ -1,27 +1,31 @@
 package cedar
 
 import (
+	"encoding/json"
 	"fmt"
 	"log/slog"
 	"net/http"
 
 	cedarlib "github.com/cedar-policy/cedar-go"
-	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	hcpv1alpha1 "github.com/gcp-hcp/gcp-hcp-backend/api/v1alpha1"
+	"github.com/gcp-hcp/gcp-hcp-backend/internal/desires"
+	"github.com/gcp-hcp/gcp-hcp-backend/internal/placement"
 )
 
 type AuthzMiddleware struct {
 	store     *Store
 	validator *JWTValidator
-	k8sClient client.Client
+	placement *placement.Client
+	statusDB  func(string) (*desires.DBClient, error)
 }
 
-func NewAuthzMiddleware(store *Store, validator *JWTValidator, k8sClient client.Client) *AuthzMiddleware {
+func NewAuthzMiddleware(store *Store, validator *JWTValidator, placementClient *placement.Client, statusDB func(string) (*desires.DBClient, error)) *AuthzMiddleware {
 	return &AuthzMiddleware{
 		store:     store,
 		validator: validator,
-		k8sClient: k8sClient,
+		placement: placementClient,
+		statusDB:  statusDB,
 	}
 }
 
@@ -64,13 +68,7 @@ func (a *AuthzMiddleware) Wrap(next http.Handler) http.Handler {
 
 		var attrs *ResourceAttributes
 		if mapping.ResourceType == ResourceTypeManagedHostedCluster && mapping.ResourceID != "" {
-			var cluster hcpv1alpha1.ManagedHostedCluster
-			if err := a.k8sClient.Get(r.Context(), client.ObjectKey{
-				Namespace: mapping.ProjectID,
-				Name:      mapping.ResourceID,
-			}, &cluster); err == nil {
-				attrs = &ResourceAttributes{Labels: cluster.Labels}
-			}
+			attrs = a.fetchResourceLabels(r, mapping.ProjectID, mapping.ResourceID)
 		}
 
 		entities, err := BuildEntityMap(identity.UserID, mapping.ProjectID, identity.Email, mapping.ResourceType, mapping.ResourceID, attrs)
@@ -103,4 +101,35 @@ func (a *AuthzMiddleware) Wrap(next http.Handler) http.Handler {
 
 		next.ServeHTTP(w, r)
 	})
+}
+
+func (a *AuthzMiddleware) fetchResourceLabels(r *http.Request, namespace, name string) *ResourceAttributes {
+	if a.placement == nil || a.statusDB == nil {
+		return nil
+	}
+
+	mc, err := a.placement.GetClusterMapping(r.Context(), namespace, name)
+	if err != nil {
+		return nil
+	}
+
+	docID := desires.NewDocumentID(desires.TaskKey,
+		"hcp.gcp.hypershift.openshift.com", "v1alpha1", "managedhostedclusters",
+		namespace, name)
+
+	db, err := a.statusDB(mc)
+	if err != nil {
+		return nil
+	}
+
+	rd, err := db.ReadDesires().Get(r.Context(), docID)
+	if err != nil || rd.Status.KubeContent == nil {
+		return nil
+	}
+
+	var cluster hcpv1alpha1.ManagedHostedCluster
+	if err := json.Unmarshal(rd.Status.KubeContent.Raw, &cluster); err != nil {
+		return nil
+	}
+	return &ResourceAttributes{Labels: cluster.Labels}
 }

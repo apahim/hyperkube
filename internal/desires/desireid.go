@@ -1,0 +1,23 @@
+package desires
+
+import (
+	"fmt"
+
+	"github.com/google/uuid"
+)
+
+// TaskKey is the field-manager identity used by the API server when computing
+// desire document IDs. Different task keys produce different document IDs for
+// the same Kubernetes resource, allowing multiple writers to coexist.
+const TaskKey = "hyperkube-apiserver"
+
+// namespaceUUID is the fixed UUID v5 namespace shared with the kube-applier
+// agent. Changing this value invalidates all existing document IDs.
+var namespaceUUID = uuid.MustParse("a3f1b2c4-d5e6-4f7a-8b9c-0d1e2f3a4b5c")
+
+// NewDocumentID computes a deterministic UUID v5 for a desire document.
+// Same inputs always produce the same UUID, providing natural idempotency.
+func NewDocumentID(taskKey, group, version, resource, namespace, name string) string {
+	input := fmt.Sprintf("%s/%s/%s/%s/%s/%s", taskKey, group, version, resource, namespace, name)
+	return uuid.NewSHA1(namespaceUUID, []byte(input)).String()
+}

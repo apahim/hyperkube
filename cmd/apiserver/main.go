@@ -17,50 +17,82 @@ limitations under the License.
 package main
 
 import (
+	"context"
 	"flag"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"os"
 
-	_ "k8s.io/client-go/plugin/pkg/client/auth"
-
-	"k8s.io/apimachinery/pkg/runtime"
-	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
-	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
-	ctrl "sigs.k8s.io/controller-runtime"
-	"sigs.k8s.io/controller-runtime/pkg/client"
+	"cloud.google.com/go/firestore"
 
 	"github.com/gcp-hcp/gcp-hcp-backend/api/openapi"
-	hcpv1alpha1 "github.com/gcp-hcp/gcp-hcp-backend/api/v1alpha1"
 	"github.com/gcp-hcp/gcp-hcp-backend/internal/apiserver"
 	"github.com/gcp-hcp/gcp-hcp-backend/internal/cedar"
+	"github.com/gcp-hcp/gcp-hcp-backend/internal/desires"
+	"github.com/gcp-hcp/gcp-hcp-backend/internal/firestorecache"
+	"github.com/gcp-hcp/gcp-hcp-backend/internal/placement"
 )
-
-var scheme = runtime.NewScheme()
-
-func init() {
-	utilruntime.Must(clientgoscheme.AddToScheme(scheme))
-	utilruntime.Must(hcpv1alpha1.AddToScheme(scheme))
-}
 
 func main() {
 	var addr string
-	var cedarPolicyNamespace string
-	var cedarGlobalPolicyCM string
+	var gcpProject string
+	var placementDatabase string
+	var cedarDatabase string
 	flag.StringVar(&addr, "addr", ":8080", "HTTP listen address")
-	flag.StringVar(&cedarPolicyNamespace, "cedar-policy-namespace", "cedar-policies", "Namespace for Cedar policy ConfigMaps")
-	flag.StringVar(&cedarGlobalPolicyCM, "cedar-global-policy-configmap", cedar.DefaultGlobalPolicyCM, "ConfigMap name for global Cedar policies")
+	flag.StringVar(&gcpProject, "gcp-project", "", "GCP project for Firestore databases")
+	flag.StringVar(&placementDatabase, "placement-database", "placement", "Firestore database for placement")
+	flag.StringVar(&cedarDatabase, "cedar-database", "cedar", "Firestore database for Cedar policies")
 	flag.Parse()
 
-	cfg := ctrl.GetConfigOrDie()
+	ctx := context.Background()
 
-	k8sClient, err := client.New(cfg, client.Options{Scheme: scheme})
-	if err != nil {
-		slog.Error("Failed to create Kubernetes client", "error", err)
+	if gcpProject == "" {
+		slog.Error("--gcp-project is required")
 		os.Exit(1)
 	}
 
-	cedarStore, err := cedar.NewStore(k8sClient, cedarPolicyNamespace, cedarGlobalPolicyCM)
+	// Placement Firestore client.
+	placementFS, err := firestore.NewClientWithDatabase(ctx, gcpProject, placementDatabase)
+	if err != nil {
+		slog.Error("Failed to create placement Firestore client", "error", err)
+		os.Exit(1)
+	}
+	defer placementFS.Close()
+	placementClient := placement.NewClient(placementFS)
+
+	// Per-management-cluster Firestore client cache.
+	fsCache := firestorecache.NewCache(gcpProject)
+	defer fsCache.Close()
+
+	specsDBFactory := func(mc string) (*desires.DBClient, error) {
+		dbID := fmt.Sprintf("mc-%s-specs", mc)
+		c, err := fsCache.GetOrCreate(ctx, dbID)
+		if err != nil {
+			return nil, err
+		}
+		return desires.NewDBClient(c), nil
+	}
+	statusDBFactory := func(mc string) (*desires.DBClient, error) {
+		dbID := fmt.Sprintf("mc-%s-status", mc)
+		c, err := fsCache.GetOrCreate(ctx, dbID)
+		if err != nil {
+			return nil, err
+		}
+		return desires.NewDBClient(c), nil
+	}
+
+	slog.Info("Firestore initialized", "project", gcpProject, "placementDB", placementDatabase, "cedarDB", cedarDatabase)
+
+	// Cedar Firestore client.
+	cedarFS, err := firestore.NewClientWithDatabase(ctx, gcpProject, cedarDatabase)
+	if err != nil {
+		slog.Error("Failed to create Cedar Firestore client", "error", err)
+		os.Exit(1)
+	}
+	defer cedarFS.Close()
+
+	cedarStore, err := cedar.NewStore(cedarFS)
 	if err != nil {
 		slog.Error("Failed to initialize Cedar store", "error", err)
 		os.Exit(1)
@@ -74,9 +106,13 @@ func main() {
 		os.Exit(1)
 	}
 
-	authzMw := cedar.NewAuthzMiddleware(cedarStore, jwtValidator, k8sClient)
+	authzMw := cedar.NewAuthzMiddleware(cedarStore, jwtValidator, placementClient, statusDBFactory)
 
-	h := &apiserver.Handler{Client: k8sClient}
+	h := &apiserver.Handler{
+		Placement: placementClient,
+		SpecsDB:   specsDBFactory,
+		StatusDB:  statusDBFactory,
+	}
 	authzH := &cedar.AuthzHandler{Store: cedarStore}
 
 	mux := http.NewServeMux()
