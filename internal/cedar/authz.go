@@ -8,9 +8,9 @@ import (
 
 	cedarlib "github.com/cedar-policy/cedar-go"
 
-	hcpv1alpha1 "github.com/gcp-hcp/gcp-hcp-backend/api/v1alpha1"
-	"github.com/gcp-hcp/gcp-hcp-backend/internal/desires"
-	"github.com/gcp-hcp/gcp-hcp-backend/internal/placement"
+	hcpv1alpha1 "github.com/apahim/hyperkube/api/v1alpha1"
+	"github.com/apahim/hyperkube/internal/desires"
+	"github.com/apahim/hyperkube/internal/placement"
 )
 
 type AuthzMiddleware struct {

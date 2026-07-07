@@ -3,8 +3,8 @@ package apiserver
 import (
 	"time"
 
-	hcpv1alpha1 "github.com/gcp-hcp/gcp-hcp-backend/api/v1alpha1"
-	"github.com/gcp-hcp/gcp-hcp-backend/internal/desires"
+	hcpv1alpha1 "github.com/apahim/hyperkube/api/v1alpha1"
+	"github.com/apahim/hyperkube/internal/desires"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 

@@ -28,8 +28,8 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
 
-	hcpv1alpha1 "github.com/gcp-hcp/gcp-hcp-backend/api/v1alpha1"
-	"github.com/gcp-hcp/gcp-hcp-backend/internal/cincinnati"
+	hcpv1alpha1 "github.com/apahim/hyperkube/api/v1alpha1"
+	"github.com/apahim/hyperkube/internal/cincinnati"
 )
 
 // VersionStreamReconciler reconciles a VersionStream object

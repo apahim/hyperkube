@@ -1,4 +1,4 @@
-module github.com/gcp-hcp/gcp-hcp-backend
+module github.com/apahim/hyperkube
 
 go 1.25.7
 

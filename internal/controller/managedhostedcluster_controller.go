@@ -25,7 +25,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/controller"
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
 
-	hcpv1alpha1 "github.com/gcp-hcp/gcp-hcp-backend/api/v1alpha1"
+	hcpv1alpha1 "github.com/apahim/hyperkube/api/v1alpha1"
 )
 
 // ManagedHostedClusterReconciler reconciles a ManagedHostedCluster object

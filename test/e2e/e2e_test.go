@@ -30,20 +30,20 @@ import (
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 
-	"github.com/gcp-hcp/gcp-hcp-backend/test/utils"
+	"github.com/apahim/hyperkube/test/utils"
 )
 
 // namespace where the project is deployed in
-const namespace = "gcp-hcp-backend-system"
+const namespace = "hyperkube-system"
 
 // serviceAccountName created for the project
-const serviceAccountName = "gcp-hcp-backend-controller-manager"
+const serviceAccountName = "hyperkube-controller-manager"
 
 // metricsServiceName is the name of the metrics service of the project
-const metricsServiceName = "gcp-hcp-backend-controller-manager-metrics-service"
+const metricsServiceName = "hyperkube-controller-manager-metrics-service"
 
 // metricsRoleBindingName is the name of the RBAC that will be created to allow get the metrics data
-const metricsRoleBindingName = "gcp-hcp-backend-metrics-binding"
+const metricsRoleBindingName = "hyperkube-metrics-binding"
 
 var _ = Describe("Manager", Ordered, func() {
 	var controllerPodName string
@@ -176,7 +176,7 @@ var _ = Describe("Manager", Ordered, func() {
 		It("should ensure the metrics endpoint is serving metrics", func() {
 			By("creating a ClusterRoleBinding for the service account to allow access to metrics")
 			cmd := exec.Command("kubectl", "create", "clusterrolebinding", metricsRoleBindingName,
-				"--clusterrole=gcp-hcp-backend-metrics-reader",
+				"--clusterrole=hyperkube-metrics-reader",
 				fmt.Sprintf("--serviceaccount=%s:%s", namespace, serviceAccountName),
 			)
 			_, err := utils.Run(cmd)

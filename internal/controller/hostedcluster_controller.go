@@ -35,7 +35,7 @@ import (
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
-	hcpv1alpha1 "github.com/gcp-hcp/gcp-hcp-backend/api/v1alpha1"
+	hcpv1alpha1 "github.com/apahim/hyperkube/api/v1alpha1"
 )
 
 var hostedClusterGVK = schema.GroupVersionKind{

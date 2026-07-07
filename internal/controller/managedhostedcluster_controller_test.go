@@ -27,7 +27,7 @@ import (
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
-	hcpv1alpha1 "github.com/gcp-hcp/gcp-hcp-backend/api/v1alpha1"
+	hcpv1alpha1 "github.com/apahim/hyperkube/api/v1alpha1"
 )
 
 var _ = Describe("ManagedHostedCluster Controller", func() {

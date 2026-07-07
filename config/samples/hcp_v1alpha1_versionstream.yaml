@@ -2,7 +2,7 @@ apiVersion: hcp.gcp.hypershift.openshift.com/v1alpha1
 kind: VersionStream
 metadata:
   labels:
-    app.kubernetes.io/name: gcp-hcp-backend
+    app.kubernetes.io/name: hyperkube
     app.kubernetes.io/managed-by: kustomize
   name: stable
 spec:

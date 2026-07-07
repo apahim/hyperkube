@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/gcp-hcp/gcp-hcp-backend/api/openapi"
+	"github.com/apahim/hyperkube/api/openapi"
 )
 
 func newTestHandler() http.Handler {

@@ -20,7 +20,7 @@ import (
 	"encoding/json"
 	"net/http"
 
-	"github.com/gcp-hcp/gcp-hcp-backend/internal/desires"
+	"github.com/apahim/hyperkube/internal/desires"
 )
 
 func writeError(w http.ResponseWriter, err error) {

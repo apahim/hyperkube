@@ -26,12 +26,12 @@ import (
 
 	"cloud.google.com/go/firestore"
 
-	"github.com/gcp-hcp/gcp-hcp-backend/api/openapi"
-	"github.com/gcp-hcp/gcp-hcp-backend/internal/apiserver"
-	"github.com/gcp-hcp/gcp-hcp-backend/internal/cedar"
-	"github.com/gcp-hcp/gcp-hcp-backend/internal/desires"
-	"github.com/gcp-hcp/gcp-hcp-backend/internal/firestorecache"
-	"github.com/gcp-hcp/gcp-hcp-backend/internal/placement"
+	"github.com/apahim/hyperkube/api/openapi"
+	"github.com/apahim/hyperkube/internal/apiserver"
+	"github.com/apahim/hyperkube/internal/cedar"
+	"github.com/apahim/hyperkube/internal/desires"
+	"github.com/apahim/hyperkube/internal/firestorecache"
+	"github.com/apahim/hyperkube/internal/placement"
 )
 
 func main() {

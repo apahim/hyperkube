@@ -1,4 +1,4 @@
-# gcp-hcp-backend - AI Agent Guide
+# hyperkube - AI Agent Guide
 
 ## Project Structure
 

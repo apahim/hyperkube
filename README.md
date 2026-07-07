@@ -1,4 +1,4 @@
-# gcp-hcp-backend
+# Hyperkube
 
 A Kubernetes operator and REST API server for managing HyperShift hosted clusters on GCP. Built with [Kubebuilder](https://book.kubebuilder.io/) v4 and [controller-runtime](https://github.com/kubernetes-sigs/controller-runtime).
 
@@ -263,13 +263,13 @@ make run       # start the controller
 
 ```bash
 # Build and push the container image
-make docker-build docker-push IMG=ghcr.io/gcp-hcp/gcp-hcp-backend:latest
+make docker-build docker-push IMG=ghcr.io/apahim/hyperkube:latest
 
 # Deploy the controller, RBAC, and CRDs
-make deploy IMG=ghcr.io/gcp-hcp/gcp-hcp-backend:latest
+make deploy IMG=ghcr.io/apahim/hyperkube:latest
 ```
 
-This deploys into the `gcp-hcp-backend-system` namespace with:
+This deploys into the `hyperkube-system` namespace with:
 - A `Deployment` running the manager (1 replica, leader election enabled)
 - A `ServiceAccount` with least-privilege RBAC
 - CRDs for all managed resources
@@ -396,7 +396,7 @@ By default, only `ManagedHostedCluster` is included (controlled by the `-kinds` 
 **Embedding in Go:** The `api/openapi` package provides the spec via `go:embed`:
 
 ```go
-import "github.com/gcp-hcp/gcp-hcp-backend/api/openapi"
+import "github.com/apahim/hyperkube/api/openapi"
 
 // openapi.Spec contains the raw YAML bytes of the OpenAPI spec
 ```
@@ -408,7 +408,7 @@ import "github.com/gcp-hcp/gcp-hcp-backend/api/openapi"
 ### Project Structure
 
 ```
-gcp-hcp-backend/
+hyperkube/
 ├── api/
 │   ├── v1alpha1/                           # CRD type definitions
 │   │   ├── groupversion_info.go            # API group registration
@@ -590,7 +590,7 @@ Environment variables:
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `KIND_CLUSTER` | `gcp-hcp-backend-test-e2e` | Kind cluster name |
+| `KIND_CLUSTER` | `hyperkube-test-e2e` | Kind cluster name |
 | `CERT_MANAGER_INSTALL_SKIP` | `false` | Skip cert-manager installation |
 
 ---
@@ -650,7 +650,7 @@ The operator follows Kubernetes security best practices:
 Generate a single manifest containing all resources:
 
 ```bash
-make build-installer IMG=ghcr.io/gcp-hcp/gcp-hcp-backend:latest
+make build-installer IMG=ghcr.io/apahim/hyperkube:latest
 ```
 
 Then install with:
